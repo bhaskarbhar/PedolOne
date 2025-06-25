@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PII Form with OTP & Consent</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: #f0f2f5;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+
+    .form-box {
+      background: white;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      width: 300px;
+    }
+
+    label {
+      font-weight: bold;
+      display: block;
+      margin-top: 1rem;
+      color: #333;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 0.6rem;
+      margin-top: 0.5rem;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+    }
+
+    button {
+      margin-top: 1.2rem;
+      width: 100%;
+      padding: 0.6rem;
+      background-color: #4CAF50;
+      color: white;
+      font-weight: bold;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #45a049;
+    }
+
+    .popup {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      padding: 2rem;
+      border: 2px solid #4CAF50;
+      border-radius: 12px;
+      box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+      z-index: 999;
+      width: 320px;
+    }
+
+    .popup.active {
+      display: block;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+
+    .input-row input[type="text"] {
+      flex: 2;
+    }
+
+    .input-row button {
+      flex: 1;
+      margin-top: 0;
+      background-color: #2196F3;
+    }
+
+    .input-row button:hover {
+      background-color: #1976D2;
+    }
+  </style>
+</head>
+<body>
+  <!-- Main Form -->
+  <div class="form-box">
+    <form onsubmit="openPopup(event)">
+      <label for="pii">Enter PII</label>
+      <input type="text" id="pii" name="pii" required>
+      <button type="submit">Submit</button>
+    </form>
+  </div>
+
+  <!-- Popup Modal -->
+  <div class="popup" id="popup">
+    <form onsubmit="finalSubmit(event)">
+      <label for="userid">Enter User ID (PedolOne)</label>
+      <div class="input-row">
+        <input type="text" id="userid" name="userid" required>
+        <button type="button" onclick="getOTP()">Get OTP</button>
+      </div>
+      <button type="submit">Submit</button>
+    </form>
+  </div>
+
+  <script>
+    function openPopup(event) {
+      event.preventDefault();
+      document.getElementById('popup').classList.add('active');
+    }
+
+    function getOTP() {
+      const userid = document.getElementById('userid').value;
+      if (userid.trim() === "") {
+        alert("Please enter User ID before requesting OTP.");
+        return;
+      }
+      alert(`OTP sent to User ID: ${userid}`);
+    }
+
+    function finalSubmit(event) {
+      event.preventDefault();
+      // Close popup
+      document.getElementById('popup').classList.remove('active');
+      // Show consent alert
+      alert("Consent given for 30 days");
+    }
+  </script>
+</body>
+</html>
