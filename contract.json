@@ -6,7 +6,10 @@
   "resources_allowed": [
     {
       "resource_name": "aadhaar",
-      "purpose": ["KYC verification", "Identity validation"],
+      "purpose": [
+        "KYC verification",
+        "Identity validation"
+      ],
       "retention_window": "30 days",
       "created_at": "2025-06-01T00:00:00Z",
       "ends_at": "2025-07-01T00:00:00Z",
@@ -14,7 +17,11 @@
     },
     {
       "resource_name": "pan",
-      "purpose": ["Tax compliance", "Income verification", "KYC"],
+      "purpose": [
+        "Tax compliance",
+        "Income verification",
+        "KYC"
+      ],
       "retention_window": "30 days",
       "created_at": "2025-06-01T00:00:00Z",
       "ends_at": "2025-07-01T00:00:00Z",
@@ -22,7 +29,10 @@
     },
     {
       "resource_name": "account",
-      "purpose": ["Account verification", "Loan disbursement"],
+      "purpose": [
+        "Account verification",
+        "Loan disbursement"
+      ],
       "retention_window": "60 days",
       "created_at": "2025-06-01T00:00:00Z",
       "ends_at": "2025-08-01T00:00:00Z",
@@ -30,7 +40,10 @@
     },
     {
       "resource_name": "ifsc",
-      "purpose": ["Bank branch verification", "Fund transfer routing"],
+      "purpose": [
+        "Bank branch verification",
+        "Fund transfer routing"
+      ],
       "retention_window": "15 days",
       "created_at": "2025-06-01T00:00:00Z",
       "ends_at": "2025-06-16T00:00:00Z",
@@ -38,7 +51,10 @@
     },
     {
       "resource_name": "creditcard",
-      "purpose": ["Credit profiling", "Fraud risk analysis"],
+      "purpose": [
+        "Credit profiling",
+        "Fraud risk analysis"
+      ],
       "retention_window": "10 days",
       "created_at": "2025-06-01T00:00:00Z",
       "ends_at": "2025-06-11T00:00:00Z",
@@ -46,7 +62,10 @@
     },
     {
       "resource_name": "debitcard",
-      "purpose": ["Spending analysis", "Account validation"],
+      "purpose": [
+        "Spending analysis",
+        "Account validation"
+      ],
       "retention_window": "10 days",
       "created_at": "2025-06-01T00:00:00Z",
       "ends_at": "2025-06-11T00:00:00Z",
@@ -54,7 +73,10 @@
     },
     {
       "resource_name": "gst",
-      "purpose": ["Business KYC", "Financial eligibility analysis"],
+      "purpose": [
+        "Business KYC",
+        "Financial eligibility analysis"
+      ],
       "retention_window": "20 days",
       "created_at": "2025-06-01T00:00:00Z",
       "ends_at": "2025-06-21T00:00:00Z",
@@ -62,7 +84,10 @@
     },
     {
       "resource_name": "itform16",
-      "purpose": ["Income validation", "Loan underwriting"],
+      "purpose": [
+        "Income validation",
+        "Loan underwriting"
+      ],
       "retention_window": "45 days",
       "created_at": "2025-06-01T00:00:00Z",
       "ends_at": "2025-07-16T00:00:00Z",
@@ -70,7 +95,10 @@
     },
     {
       "resource_name": "upi",
-      "purpose": ["Digital payment mapping", "Fraud detection"],
+      "purpose": [
+        "Digital payment mapping",
+        "Fraud detection"
+      ],
       "retention_window": "7 days",
       "created_at": "2025-06-01T00:00:00Z",
       "ends_at": "2025-06-08T00:00:00Z",
@@ -78,7 +106,10 @@
     },
     {
       "resource_name": "passport",
-      "purpose": ["Cross-border KYC", "Identity verification"],
+      "purpose": [
+        "Cross-border KYC",
+        "Identity verification"
+      ],
       "retention_window": "30 days",
       "created_at": "2025-06-01T00:00:00Z",
       "ends_at": "2025-07-01T00:00:00Z",
@@ -86,7 +117,10 @@
     },
     {
       "resource_name": "drivinglicense",
-      "purpose": ["KYC", "Alternate identity proof"],
+      "purpose": [
+        "KYC",
+        "Alternate identity proof"
+      ],
       "retention_window": "30 days",
       "created_at": "2025-06-01T00:00:00Z",
       "ends_at": "2025-07-01T00:00:00Z",
