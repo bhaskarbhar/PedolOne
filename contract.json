@@ -1,0 +1,85 @@
+{
+  "contract_id": "contract_banka_kyc_2025",
+  "organization_name": "BankA",
+  "created_at": "2025-06-01T00:00:00Z",
+  "ends_at": "2026-06-01T00:00:00Z",
+  "resources_allowed": [
+    {
+      "resource_name": "aadhaar",
+      "retention_window": "30 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-07-01T00:00:00Z",
+      "signature": "bankA_signed_hash_001"
+    },
+    {
+      "resource_name": "pan",
+      "retention_window": "30 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-07-01T00:00:00Z",
+      "signature": "bankA_signed_hash_002"
+    },
+    {
+      "resource_name": "account",
+      "retention_window": "60 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-08-01T00:00:00Z",
+      "signature": "bankA_signed_hash_003"
+    },
+    {
+      "resource_name": "ifsc",
+      "retention_window": "15 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-06-16T00:00:00Z",
+      "signature": "bankA_signed_hash_004"
+    },
+    {
+      "resource_name": "creditcard",
+      "retention_window": "10 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-06-11T00:00:00Z",
+      "signature": "bankA_signed_hash_005"
+    },
+    {
+      "resource_name": "debitcard",
+      "retention_window": "10 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-06-11T00:00:00Z",
+      "signature": "bankA_signed_hash_006"
+    },
+    {
+      "resource_name": "gst",
+      "retention_window": "20 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-06-21T00:00:00Z",
+      "signature": "bankA_signed_hash_007"
+    },
+    {
+      "resource_name": "itform16",
+      "retention_window": "45 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-07-16T00:00:00Z",
+      "signature": "bankA_signed_hash_008"
+    },
+    {
+      "resource_name": "upi",
+      "retention_window": "7 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-06-08T00:00:00Z",
+      "signature": "bankA_signed_hash_009"
+    },
+    {
+      "resource_name": "passport",
+      "retention_window": "30 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-07-01T00:00:00Z",
+      "signature": "bankA_signed_hash_010"
+    },
+    {
+      "resource_name": "drivinglicense",
+      "retention_window": "30 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-07-01T00:00:00Z",
+      "signature": "bankA_signed_hash_011"
+    }
+  ]
+}
