@@ -1,6 +1,17 @@
 from fastapi import FastAPI
-from routers import pii_tokenizer
+from fastapi.middleware.cors import CORSMiddleware
+from routers import pii_tokenizer, auth
 
 app = FastAPI(title="Secure PII Tokenization API", version="1.0.0")
 
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure this properly in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(pii_tokenizer.router)
+app.include_router(auth.router)
