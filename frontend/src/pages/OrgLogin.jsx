@@ -25,90 +25,202 @@ export default function OrgLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div className="text-center">
-          <Building className="mx-auto h-12 w-12 text-blue-600" />
-          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(to bottom right, #eff6ff, #dbeafe)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '2rem 1rem'
+    }}>
+      <div style={{
+        maxWidth: '400px',
+        width: '100%',
+        backgroundColor: 'white',
+        borderRadius: '12px',
+        padding: '2rem',
+        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.1)'
+      }}>
+        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+          <Building style={{ 
+            color: '#2563eb', 
+            width: '48px', 
+            height: '48px', 
+            margin: '0 auto 1rem' 
+          }} />
+          <h2 style={{
+            fontSize: '1.875rem',
+            fontWeight: 'bold',
+            color: '#111827',
+            marginBottom: '0.5rem'
+          }}>
             Organization Login
           </h2>
-          <p className="mt-2 text-sm text-gray-600">
+          <p style={{ color: '#6b7280', fontSize: '0.875rem' }}>
             Sign in to your organization account
           </p>
         </div>
         
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="orgCode" className="block text-sm font-medium text-gray-700">
-                Organization Code
-              </label>
-              <div className="mt-1 relative">
-                <input
-                  id="orgCode"
-                  name="orgCode"
-                  type="text"
-                  required
-                  className="appearance-none relative block w-full px-3 py-2 pl-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Enter organization code"
-                  value={formData.orgCode}
-                  onChange={handleChange}
-                />
-                <Building className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
-              </div>
+        <form onSubmit={handleSubmit} style={{ marginBottom: '1rem' }}>
+          <div style={{ marginBottom: '1rem' }}>
+            <label htmlFor="orgCode" style={{
+              display: 'block',
+              fontSize: '0.875rem',
+              fontWeight: '500',
+              color: '#374151',
+              marginBottom: '0.5rem'
+            }}>
+              Organization Code
+            </label>
+            <div style={{ position: 'relative' }}>
+              <input
+                id="orgCode"
+                name="orgCode"
+                type="text"
+                required
+                style={{
+                  width: '100%',
+                  padding: '12px 12px 12px 40px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '8px',
+                  fontSize: '1rem',
+                  outline: 'none',
+                  transition: 'border-color 0.2s',
+                }}
+                placeholder="Enter organization code"
+                value={formData.orgCode}
+                onChange={handleChange}
+                onFocus={(e) => e.target.style.borderColor = '#2563eb'}
+                onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+              />
+              <Building style={{
+                position: 'absolute',
+                left: '12px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                width: '20px',
+                height: '20px',
+                color: '#9ca3af'
+              }} />
             </div>
-            
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                Email Address
-              </label>
-              <div className="mt-1 relative">
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  required
-                  className="appearance-none relative block w-full px-3 py-2 pl-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Enter your email"
-                  value={formData.email}
-                  onChange={handleChange}
-                />
-                <Mail className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
-              </div>
+          </div>
+          
+          <div style={{ marginBottom: '1rem' }}>
+            <label htmlFor="email" style={{
+              display: 'block',
+              fontSize: '0.875rem',
+              fontWeight: '500',
+              color: '#374151',
+              marginBottom: '0.5rem'
+            }}>
+              Email Address
+            </label>
+            <div style={{ position: 'relative' }}>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                required
+                style={{
+                  width: '100%',
+                  padding: '12px 12px 12px 40px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '8px',
+                  fontSize: '1rem',
+                  outline: 'none',
+                  transition: 'border-color 0.2s',
+                }}
+                placeholder="Enter your email"
+                value={formData.email}
+                onChange={handleChange}
+                onFocus={(e) => e.target.style.borderColor = '#2563eb'}
+                onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+              />
+              <Mail style={{
+                position: 'absolute',
+                left: '12px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                width: '20px',
+                height: '20px',
+                color: '#9ca3af'
+              }} />
             </div>
-            
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                Password
-              </label>
-              <div className="mt-1 relative">
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  required
-                  className="appearance-none relative block w-full px-3 py-2 pl-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Enter your password"
-                  value={formData.password}
-                  onChange={handleChange}
-                />
-                <Lock className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
-              </div>
+          </div>
+          
+          <div style={{ marginBottom: '1rem' }}>
+            <label htmlFor="password" style={{
+              display: 'block',
+              fontSize: '0.875rem',
+              fontWeight: '500',
+              color: '#374151',
+              marginBottom: '0.5rem'
+            }}>
+              Password
+            </label>
+            <div style={{ position: 'relative' }}>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                required
+                style={{
+                  width: '100%',
+                  padding: '12px 12px 12px 40px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '8px',
+                  fontSize: '1rem',
+                  outline: 'none',
+                  transition: 'border-color 0.2s',
+                }}
+                placeholder="Enter your password"
+                value={formData.password}
+                onChange={handleChange}
+                onFocus={(e) => e.target.style.borderColor = '#2563eb'}
+                onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+              />
+              <Lock style={{
+                position: 'absolute',
+                left: '12px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                width: '20px',
+                height: '20px',
+                color: '#9ca3af'
+              }} />
             </div>
           </div>
 
-          <div className="flex items-center justify-between">
-            <div className="text-sm">
-              <a href="#" className="font-medium text-blue-600 hover:text-blue-500">
-                Forgot your password?
-              </a>
-            </div>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            marginBottom: '1.5rem',
+            fontSize: '0.875rem'
+          }}>
+            <a href="#" style={{
+              color: '#2563eb',
+              textDecoration: 'none',
+              fontWeight: '500'
+            }}>
+              Forgot your password?
+            </a>
           </div>
 
-          <div className="space-y-4">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <Button
               type="submit"
-              className="w-full"
+              style={{
+                width: '100%',
+                backgroundColor: '#2563eb',
+                color: 'white',
+                padding: '12px',
+                fontSize: '1rem',
+                fontWeight: '500',
+                borderRadius: '8px',
+                border: 'none',
+                cursor: 'pointer'
+              }}
             >
               Sign In to Organization
             </Button>
@@ -116,8 +228,17 @@ export default function OrgLogin() {
             <Button
               type="button"
               variant="outline"
-              className="w-full"
               onClick={() => navigate('/')}
+              style={{
+                width: '100%',
+                backgroundColor: 'white',
+                color: '#374151',
+                border: '1px solid #d1d5db',
+                padding: '12px',
+                fontSize: '1rem',
+                borderRadius: '8px',
+                cursor: 'pointer'
+              }}
             >
               Back to Home
             </Button>

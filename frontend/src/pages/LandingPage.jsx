@@ -7,62 +7,147 @@ export default function LandingPage() {
   const navigate = useNavigate();
 
   return (
-    <div className="bg-white">
-      <section className="min-h-[60vh] flex flex-col items-center justify-center text-center px-6 py-20">
+    <div className="bg-white w-full">
+      {/* Hero Section */}
+      <section className="min-h-[60vh] flex flex-col items-center justify-center text-center px-4 sm:px-6 lg:px-8 py-12 sm:py-16 lg:py-20">
         <motion.h1
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
-          className="text-5xl font-bold text-blue-900 mb-6"
+          className="text-3xl sm:text-4xl lg:text-5xl font-bold text-blue-900 mb-4 sm:mb-6 leading-tight"
         >
-          SecureVault: Secure. Share. Comply.
+          PedolOne: Secure. Share. Comply.
         </motion.h1>
-        <p className="text-lg text-gray-700 max-w-2xl mb-8">
+        <p className="text-base sm:text-lg text-gray-700 max-w-2xl mb-6 sm:mb-8 px-2">
           Empower your organization or personal finance profile with privacy-first data vaulting, controlled sharing, and airtight compliance. Built for the modern fintech ecosystem.
         </p>
-        <div className="flex gap-6">
-          <Button onClick={() => navigate('/login/org')}>I’m an Organisation</Button>
-          <Button onClick={() => navigate('/login/user')}>I’m an Individual</Button>
+        
+        {/* Centered Button Container */}
+        <div style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          gap: '16px', 
+          width: '100%', 
+          maxWidth: '400px',
+          margin: '0 auto'
+        }}>
+          <Button 
+            onClick={() => navigate('/login/org')}
+            size="lg"
+            style={{ width: '100%', maxWidth: '280px' }}
+          >
+            I'm an Organisation
+          </Button>
+          <Button 
+            onClick={() => navigate('/login/user')}
+            size="lg"
+            style={{ width: '100%', maxWidth: '280px' }}
+          >
+            I'm an Individual
+          </Button>
+        </div>
+
+        {/* Desktop Layout */}
+        <div style={{ 
+          display: 'none'
+        }} className="sm:flex sm:flex-row sm:gap-6 sm:mt-4">
+          <Button 
+            onClick={() => navigate('/login/org')}
+            size="lg"
+            style={{ minWidth: '200px' }}
+          >
+            I'm an Organisation
+          </Button>
+          <Button 
+            onClick={() => navigate('/login/user')}
+            size="lg"
+            style={{ minWidth: '200px' }}
+          >
+            I'm an Individual
+          </Button>
         </div>
       </section>
 
-      <section id="features" className="bg-blue-50 py-16 px-6">
-        <div className="max-w-6xl mx-auto text-center">
-          <h2 className="text-3xl font-bold text-blue-900 mb-10">Key Features</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
-            <div className="p-6 bg-white shadow rounded-lg">
-              <ShieldCheck className="text-blue-700 w-10 h-10 mb-4 mx-auto" />
-              <h3 className="font-semibold text-xl mb-2">Policy-Bound Access</h3>
-              <p className="text-gray-600">Fine-grained, contract-wrapped data sharing with full consent and logging controls.</p>
+      {/* Features Section */}
+      <section id="features" style={{ backgroundColor: '#eff6ff', padding: '3rem 1rem' }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto', textAlign: 'center' }}>
+          <h2 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#1e3a8a', marginBottom: '2.5rem' }}>
+            Key Features
+          </h2>
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', 
+            gap: '2rem' 
+          }}>
+            <div style={{ 
+              padding: '1.5rem', 
+              backgroundColor: 'white', 
+              borderRadius: '8px', 
+              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)' 
+            }}>
+              <ShieldCheck style={{ color: '#1d4ed8', width: '40px', height: '40px', margin: '0 auto 1rem' }} />
+              <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '0.5rem' }}>
+                Policy-Bound Access
+              </h3>
+              <p style={{ color: '#6b7280', fontSize: '1rem' }}>
+                Fine-grained, contract-wrapped data sharing with full consent and logging controls.
+              </p>
             </div>
-            <div className="p-6 bg-white shadow rounded-lg">
-              <LockKeyhole className="text-blue-700 w-10 h-10 mb-4 mx-auto" />
-              <h3 className="font-semibold text-xl mb-2">End-to-End Security</h3>
-              <p className="text-gray-600">AES encryption, tokenization, and user-controlled sharing protect every PII asset.</p>
+            <div style={{ 
+              padding: '1.5rem', 
+              backgroundColor: 'white', 
+              borderRadius: '8px', 
+              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)' 
+            }}>
+              <LockKeyhole style={{ color: '#1d4ed8', width: '40px', height: '40px', margin: '0 auto 1rem' }} />
+              <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '0.5rem' }}>
+                End-to-End Security
+              </h3>
+              <p style={{ color: '#6b7280', fontSize: '1rem' }}>
+                AES encryption, tokenization, and user-controlled sharing protect every PII asset.
+              </p>
             </div>
-            <div className="p-6 bg-white shadow rounded-lg">
-              <User className="text-blue-700 w-10 h-10 mb-4 mx-auto" />
-              <h3 className="font-semibold text-xl mb-2">Built for Fintech</h3>
-              <p className="text-gray-600">Easily integrate with banks, NBFCs, and financial services via secure APIs.</p>
+            <div style={{ 
+              padding: '1.5rem', 
+              backgroundColor: 'white', 
+              borderRadius: '8px', 
+              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)' 
+            }}>
+              <User style={{ color: '#1d4ed8', width: '40px', height: '40px', margin: '0 auto 1rem' }} />
+              <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '0.5rem' }}>
+                Built for Fintech
+              </h3>
+              <p style={{ color: '#6b7280', fontSize: '1rem' }}>
+                Easily integrate with banks, NBFCs, and financial services via secure APIs.
+              </p>
             </div>
           </div>
         </div>
       </section>
 
-      <section id="about" className="py-20 px-6 bg-white">
-        <div className="max-w-4xl mx-auto text-center">
-          <h2 className="text-3xl font-bold text-blue-900 mb-6">About SecureVault</h2>
-          <p className="text-gray-700 text-lg">
-            SecureVault is a SaaS platform revolutionizing how sensitive financial data is stored and shared. Our vault-first architecture ensures that your user data remains in your control — auditable, consent-driven, and enterprise-ready.
+      {/* About Section */}
+      <section id="about" style={{ padding: '3rem 1rem', backgroundColor: 'white' }}>
+        <div style={{ maxWidth: '800px', margin: '0 auto', textAlign: 'center' }}>
+          <h2 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#1e3a8a', marginBottom: '1.5rem' }}>
+            About PedolOne
+          </h2>
+          <p style={{ color: '#374151', fontSize: '1.125rem', lineHeight: '1.6' }}>
+            PedolOne is a SaaS platform revolutionizing how sensitive financial data is stored and shared. Our vault-first architecture ensures that your user data remains in your control — auditable, consent-driven, and enterprise-ready.
           </p>
         </div>
       </section>
 
-      <section id="contact" className="bg-blue-100 py-16 px-6">
-        <div className="max-w-4xl mx-auto text-center">
-          <h2 className="text-3xl font-bold text-blue-900 mb-4">Get in Touch</h2>
-          <p className="text-gray-700 mb-6">Want to partner, integrate, or learn more? We’d love to talk.</p>
-          <Button>Email Us</Button>
+      {/* Contact Section */}
+      <section id="contact" style={{ backgroundColor: '#dbeafe', padding: '3rem 1rem' }}>
+        <div style={{ maxWidth: '800px', margin: '0 auto', textAlign: 'center' }}>
+          <h2 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#1e3a8a', marginBottom: '1rem' }}>
+            Get in Touch
+          </h2>
+          <p style={{ color: '#374151', marginBottom: '1.5rem', fontSize: '1rem' }}>
+            Want to partner, integrate, or learn more? We'd love to talk.
+          </p>
+          <Button size="lg">Email Us</Button>
         </div>
       </section>
     </div>

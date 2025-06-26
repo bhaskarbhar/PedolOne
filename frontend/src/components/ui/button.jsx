@@ -6,28 +6,86 @@ export function Button({
   variant = 'primary', 
   size = 'md', 
   className = '', 
+  style = {},
   ...props 
 }) {
-  const baseClasses = 'inline-flex items-center justify-center rounded-lg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none';
-  
+  // Base styles that will work even without Tailwind
+  const baseStyle = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '8px',
+    fontWeight: '500',
+    transition: 'all 0.2s',
+    cursor: 'pointer',
+    border: 'none',
+    textDecoration: 'none',
+    fontFamily: 'inherit',
+    outline: 'none',
+    userSelect: 'none',
+    ...style
+  };
+
   const variants = {
-    primary: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
-    secondary: 'bg-gray-200 text-gray-900 hover:bg-gray-300 focus:ring-gray-500',
-    outline: 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 focus:ring-blue-500',
+    primary: {
+      backgroundColor: '#2563eb',
+      color: 'white',
+      boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+      padding: size === 'sm' ? '8px 12px' : size === 'lg' ? '12px 24px' : '10px 16px',
+      fontSize: size === 'sm' ? '14px' : size === 'lg' ? '18px' : '16px',
+      minHeight: size === 'sm' ? '36px' : size === 'lg' ? '48px' : '44px',
+    },
+    secondary: {
+      backgroundColor: '#e5e7eb',
+      color: '#374151',
+      boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+      padding: size === 'sm' ? '8px 12px' : size === 'lg' ? '12px 24px' : '10px 16px',
+      fontSize: size === 'sm' ? '14px' : size === 'lg' ? '18px' : '16px',
+      minHeight: size === 'sm' ? '36px' : size === 'lg' ? '48px' : '44px',
+    },
+    outline: {
+      backgroundColor: 'white',
+      color: '#374151',
+      border: '1px solid #d1d5db',
+      boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+      padding: size === 'sm' ? '8px 12px' : size === 'lg' ? '12px 24px' : '10px 16px',
+      fontSize: size === 'sm' ? '14px' : size === 'lg' ? '18px' : '16px',
+      minHeight: size === 'sm' ? '36px' : size === 'lg' ? '48px' : '44px',
+    },
   };
-  
-  const sizes = {
-    sm: 'px-3 py-2 text-sm',
-    md: 'px-4 py-2 text-base',
-    lg: 'px-6 py-3 text-lg',
+
+  const finalStyle = {
+    ...baseStyle,
+    ...variants[variant],
   };
-  
-  const classes = `${baseClasses} ${variants[variant]} ${sizes[size]} ${className}`;
-  
+
+  const handleMouseEnter = (e) => {
+    if (variant === 'primary') {
+      e.target.style.backgroundColor = '#1d4ed8';
+    } else if (variant === 'secondary') {
+      e.target.style.backgroundColor = '#d1d5db';
+    } else if (variant === 'outline') {
+      e.target.style.backgroundColor = '#f9fafb';
+    }
+  };
+
+  const handleMouseLeave = (e) => {
+    if (variant === 'primary') {
+      e.target.style.backgroundColor = '#2563eb';
+    } else if (variant === 'secondary') {
+      e.target.style.backgroundColor = '#e5e7eb';
+    } else if (variant === 'outline') {
+      e.target.style.backgroundColor = 'white';
+    }
+  };
+
   return (
     <button 
-      className={classes} 
+      style={finalStyle}
+      className={`${className}`}
       onClick={onClick} 
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
       {...props}
     >
       {children}
