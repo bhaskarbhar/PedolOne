@@ -1,5 +1,5 @@
-from pydantic import BaseModel, EmailStr, Field
-from typing import Optional
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from typing import Optional, List
 from datetime import datetime
 from bson import ObjectId
 
@@ -66,3 +66,22 @@ class RegisterResponse(BaseModel):
     message: str
     user_id: int
     email_status: str
+
+# --- Policy Model ---
+class Policy(BaseModel):
+    id: Optional[ObjectId] = Field(default=None, alias="_id")
+    tokenid: str
+    resource_name: str
+    purpose: List[str]
+    shared_with: str
+    contract_id: str
+    retention_window: str
+    created_at: datetime
+    expiry: datetime
+    signature: str
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        populate_by_name=True,
+        json_encoders={ObjectId: str}
+    )
