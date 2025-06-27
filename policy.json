@@ -1,0 +1,13 @@
+{
+  "Tokenid": "<Unique tokenized ID of the PII>",
+  "resource_name": "<Type of PII resource (e.g., aadhaar, pan)>",
+  "Purpose": [
+    "<Primary and secondary usage purposes derived from contract>"
+  ],
+  "Shared_with": "<Organization or entity with which data is shared>",
+  "Contract_id": "<Reference to contract governing the data sharing>",
+  "Retention_window": "<Declared duration (e.g., '30 days')>",
+  "Created_at": "<Timestamp of policy generation or data collection>",
+  "Expiry": "<Auto-calculated from Created_at + Retention_window>",
+  "Signature": "<Cryptographic hash or HMAC to ensure integrity>"
+}
