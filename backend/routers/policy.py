@@ -2,13 +2,18 @@ import os
 import json
 from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta
-
 from fastapi.encoders import jsonable_encoder
-from models import Policy, PIIInput
-from routers.pii_tokenizer import tokenize_aadhaar
-from helpers import generate_policy_signature
 from pymongo import MongoClient
 from dotenv import load_dotenv
+from models import PIIInput
+
+from helpers import generate_policy_signature
+from routers.pii_tokenizer import (
+    tokenize_aadhaar, tokenize_pan, tokenize_account, tokenize_ifsc,
+    tokenize_creditcard, tokenize_debitcard, tokenize_gst,
+    tokenize_itform16, tokenize_upi, tokenize_passport, tokenize_dl
+)
+from models import UserInputPII
 
 load_dotenv()
 
@@ -18,21 +23,45 @@ MONGO_URL = os.getenv("MONGO_URL")
 client = MongoClient(MONGO_URL)
 db = client.get_database("PedolOne")
 policies_collection = db.get_collection("policy")
-# Create TTL index for automatic expiry-based deletion (one-time setup)
 policies_collection.create_index("expiry", expireAfterSeconds=0)
-# Load contract.json
+
 with open("routers/contract.json") as f:
     contract = json.load(f)
 
-@router.post("/aadhaar")
-def create_aadhaar_policy(data: PIIInput):
-    val = data.pii_value.strip()
-    token_response = tokenize_aadhaar(val)
-    token = token_response["token"]
+# Map resource to tokenizer function
+TOKENIZER_MAP = {
+    "aadhaar": tokenize_aadhaar,
+    "pan": tokenize_pan,
+    "account": tokenize_account,
+    "ifsc": tokenize_ifsc,
+    "creditcard": tokenize_creditcard,
+    "debitcard": tokenize_debitcard,
+    "gst": tokenize_gst,
+    "itform16": tokenize_itform16,
+    "upi": tokenize_upi,
+    "passport": tokenize_passport,
+    "drivinglicense": tokenize_dl
+}
 
-    matched = next((r for r in contract["resources_allowed"] if r["resource_name"] == "aadhaar"), None)
+@router.post("/input")
+def create_policy(data: UserInputPII):
+    pii_value = data.pii_value.strip()
+    resource = data.resource.strip().lower()
+
+    if resource not in TOKENIZER_MAP:
+        raise HTTPException(status_code=400, detail=f"Unsupported resource type: {resource}")
+
+    matched = next((r for r in contract["resources_allowed"] if r["resource_name"] == resource), None)
     if not matched:
-        raise HTTPException(status_code=404, detail="Aadhaar contract not found")
+        raise HTTPException(status_code=404, detail=f"{resource} not allowed by contract")
+
+    try:
+        token_response = TOKENIZER_MAP[resource](PIIInput(pii_value=pii_value))
+        token = token_response["token"]
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
     created_at = datetime.utcnow()
     retention_days = int(matched["retention_window"].split()[0])
@@ -40,7 +69,7 @@ def create_aadhaar_policy(data: PIIInput):
 
     policy_data = {
         "tokenid": token,
-        "resource_name": "aadhaar",
+        "resource_name": resource,
         "purpose": matched["purpose"],
         "shared_with": contract["organization_name"],
         "contract_id": contract["contract_id"],
@@ -49,13 +78,13 @@ def create_aadhaar_policy(data: PIIInput):
         "expiry": expiry
     }
 
-    # Generate signature from serialized data (excluding signature itself)
-    signature_payload = json.dumps({k: str(v) if isinstance(v, datetime) else v for k, v in policy_data.items()}, sort_keys=True)
+    signature_payload = json.dumps(
+        {k: str(v) if isinstance(v, datetime) else v for k, v in policy_data.items()},
+        sort_keys=True
+    )
     policy_data["signature"] = generate_policy_signature(signature_payload)
 
     result = policies_collection.insert_one(policy_data)
-    policy_data["_id"] = result.inserted_id
+    policy_data["_id"] = str(result.inserted_id)  # ✅ convert ObjectId to str
 
-    # Convert to Pydantic model and encode for safe JSON response
-    policy_obj = Policy(**policy_data)
-    return jsonable_encoder(policy_obj)
+    return jsonable_encoder(policy_data)  # now safe to encode

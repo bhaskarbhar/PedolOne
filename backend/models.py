@@ -3,9 +3,15 @@ from typing import Optional, List
 from datetime import datetime
 from bson import ObjectId
 
+# Tokenization
 class PIIInput(BaseModel):
     pii_value: str
 
+#Policy Creation
+class UserInputPII(BaseModel):
+    pii_value: str
+    resource: str   # used in /policy/input
+    
 # User Models for Authentication
 class UserRegistration(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
