@@ -1,15 +1,25 @@
-from pydantic import BaseModel, EmailStr, Field
-from typing import Optional
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from typing import Optional, List
 from datetime import datetime
 from bson import ObjectId
 
+# Tokenization
 class PIIInput(BaseModel):
     pii_value: str
 
+#Policy Creation
+class UserInputPII(BaseModel):
+    pii_value: str
+    resource: str   # used in /policy/input
+    
 # User Models for Authentication
 class UserRegistration(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    full_name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr
+    phone_number: str = Field(..., min_length=10, max_length=15)
     password: str = Field(..., min_length=8)
+    user_type: str = Field(default="individual")  # "individual" or "organization"
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -25,8 +35,12 @@ class LoginVerification(BaseModel):
 
 class User(BaseModel):
     userid: Optional[int] = None
+    username: str
+    full_name: str
     email: EmailStr
+    phone_number: str
     password_hash: str
+    user_type: str = "individual"  # "individual" or "organization"
     email_verified: bool = False
     created_at: Optional[datetime] = None
     email_otp: Optional[str] = None
@@ -52,7 +66,11 @@ class TokenData(BaseModel):
 # Response Models
 class UserResponse(BaseModel):
     userid: int
+    username: str
+    full_name: str
     email: str
+    phone_number: str
+    user_type: str
     email_verified: bool
     created_at: datetime
 
@@ -66,3 +84,22 @@ class RegisterResponse(BaseModel):
     message: str
     user_id: int
     email_status: str
+
+# --- Policy Model ---
+class Policy(BaseModel):
+    id: Optional[ObjectId] = Field(default=None, alias="_id")
+    tokenid: str
+    resource_name: str
+    purpose: List[str]
+    shared_with: str
+    contract_id: str
+    retention_window: str
+    created_at: datetime
+    expiry: datetime
+    signature: str
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        populate_by_name=True,
+        json_encoders={ObjectId: str}
+    )

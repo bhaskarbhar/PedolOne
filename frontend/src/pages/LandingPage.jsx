@@ -1,5 +1,4 @@
 import { useNavigate } from 'react-router-dom';
-import { Button } from "@/components/ui/button";
 import { Briefcase, User, ShieldCheck, LockKeyhole } from "lucide-react";
 import { motion } from 'framer-motion';
 
@@ -32,40 +31,90 @@ export default function LandingPage() {
           maxWidth: '400px',
           margin: '0 auto'
         }}>
-          <Button 
+          <button 
             onClick={() => navigate('/login/org')}
-            size="lg"
-            style={{ width: '100%', maxWidth: '280px' }}
+            style={{ 
+              width: '100%', 
+              maxWidth: '280px',
+              padding: '12px 24px',
+              fontSize: '1rem',
+              fontWeight: '500',
+              backgroundColor: '#2563eb',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              transition: 'background-color 0.2s'
+            }}
+            onMouseOver={(e) => e.target.style.backgroundColor = '#1d4ed8'}
+            onMouseOut={(e) => e.target.style.backgroundColor = '#2563eb'}
           >
             I'm an Organisation
-          </Button>
-          <Button 
+          </button>
+          <button 
             onClick={() => navigate('/login/user')}
-            size="lg"
-            style={{ width: '100%', maxWidth: '280px' }}
+            style={{ 
+              width: '100%', 
+              maxWidth: '280px',
+              padding: '12px 24px',
+              fontSize: '1rem',
+              fontWeight: '500',
+              backgroundColor: '#059669',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              transition: 'background-color 0.2s'
+            }}
+            onMouseOver={(e) => e.target.style.backgroundColor = '#047857'}
+            onMouseOut={(e) => e.target.style.backgroundColor = '#059669'}
           >
             I'm an Individual
-          </Button>
+          </button>
         </div>
 
         {/* Desktop Layout */}
         <div style={{ 
           display: 'none'
         }} className="sm:flex sm:flex-row sm:gap-6 sm:mt-4">
-          <Button 
+          <button 
             onClick={() => navigate('/login/org')}
-            size="lg"
-            style={{ minWidth: '200px' }}
+            style={{ 
+              minWidth: '200px',
+              padding: '12px 24px',
+              fontSize: '1rem',
+              fontWeight: '500',
+              backgroundColor: '#2563eb',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              transition: 'background-color 0.2s'
+            }}
+            onMouseOver={(e) => e.target.style.backgroundColor = '#1d4ed8'}
+            onMouseOut={(e) => e.target.style.backgroundColor = '#2563eb'}
           >
             I'm an Organisation
-          </Button>
-          <Button 
+          </button>
+          <button 
             onClick={() => navigate('/login/user')}
-            size="lg"
-            style={{ minWidth: '200px' }}
+            style={{ 
+              minWidth: '200px',
+              padding: '12px 24px',
+              fontSize: '1rem',
+              fontWeight: '500',
+              backgroundColor: '#059669',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              transition: 'background-color 0.2s'
+            }}
+            onMouseOver={(e) => e.target.style.backgroundColor = '#047857'}
+            onMouseOut={(e) => e.target.style.backgroundColor = '#059669'}
           >
             I'm an Individual
-          </Button>
+          </button>
         </div>
       </section>
 
@@ -147,7 +196,23 @@ export default function LandingPage() {
           <p style={{ color: '#374151', marginBottom: '1.5rem', fontSize: '1rem' }}>
             Want to partner, integrate, or learn more? We'd love to talk.
           </p>
-          <Button size="lg">Email Us</Button>
+          <button 
+            style={{
+              padding: '12px 24px',
+              fontSize: '1rem',
+              fontWeight: '500',
+              backgroundColor: '#2563eb',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              transition: 'background-color 0.2s'
+            }}
+            onMouseOver={(e) => e.target.style.backgroundColor = '#1d4ed8'}
+            onMouseOut={(e) => e.target.style.backgroundColor = '#2563eb'}
+          >
+            Email Us
+          </button>
         </div>
       </section>
     </div>

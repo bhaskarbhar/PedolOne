@@ -1,7 +1,17 @@
 import hashlib
 import uuid
 import re
+from datetime import datetime, timedelta
+import hmac
+import base64
 from typing import Optional
+import os
+from pymongo import MongoClient
+
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017/")
+client = MongoClient(MONGO_URL)
+db = client.PedolOne
+users_collection = db.users
 
 def token_sha3(data: str) -> str:
     return hashlib.sha3_256(data.encode()).hexdigest()
@@ -61,3 +71,20 @@ def validate_password_strength(password: str) -> tuple[bool, str]:
         return False, "Password must contain at least one special character"
     
     return True, "Password is strong"
+
+def parse_retention_window(retention: str) -> int:
+    """Parse retention like '30 days' into number of days"""
+    match = re.match(r'(\d+)\s*days?', retention.lower())
+    return int(match.group(1)) if match else 0
+
+def calculate_expiry(created_at: datetime, retention: str) -> datetime:
+    """Calculate expiry datetime based on retention window"""
+    days = parse_retention_window(retention)
+    return created_at + timedelta(days=days)
+
+def generate_policy_signature(data: str, secret_key: Optional[str] = None) -> str:
+    """Generate HMAC-SHA256 signature for policy"""
+    if not secret_key:
+        secret_key = os.getenv("POLICY_SECRET_KEY")
+    signature = hmac.new(secret_key.encode(), data.encode(), hashlib.sha256).digest()
+    return base64.b64encode(signature).decode()
