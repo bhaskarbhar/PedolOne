@@ -6,6 +6,13 @@ import hmac
 import base64
 from typing import Optional
 import os
+from pymongo import MongoClient
+
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017/")
+client = MongoClient(MONGO_URL)
+db = client.PedolOne
+users_collection = db.users
+
 def token_sha3(data: str) -> str:
     return hashlib.sha3_256(data.encode()).hexdigest()
 

@@ -1,20 +1,67 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { Building, Mail, Lock } from 'lucide-react';
+import { Building2, Mail, Lock } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import OTPVerification from '../components/OTPVerification';
 
 export default function OrgLogin() {
   const navigate = useNavigate();
+  const { login, verifyLogin, loading, error, clearError, isAuthenticated, user } = useAuth();
+  
   const [formData, setFormData] = useState({
     email: '',
-    password: '',
-    orgCode: ''
+    password: ''
   });
+  const [step, setStep] = useState('login'); // 'login' | 'otp'
+  const [loginEmail, setLoginEmail] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      if (user.user_type === 'organization') {
+        navigate('/dashboard/org');
+      } else {
+        navigate('/dashboard/user');
+      }
+    }
+  }, [isAuthenticated, user, navigate]);
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // Handle organization login logic here
-    console.log('Org login:', formData);
+    clearError();
+
+    const result = await login(formData.email, formData.password);
+    
+    if (result.success && result.requiresOtp) {
+      setLoginEmail(formData.email);
+      setStep('otp');
+    }
+  };
+
+  const handleOTPVerify = async (otp) => {
+    setOtpLoading(true);
+    try {
+      const result = await verifyLogin(loginEmail, otp);
+      
+      if (result.success) {
+        // Redirect based on user type
+        if (result.user.user_type === 'organization') {
+          navigate('/dashboard/org');
+        } else {
+          navigate('/dashboard/user');
+        }
+      }
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleBackToLogin = () => {
+    setStep('login');
+    setLoginEmail('');
+    setOtpLoading(false);
+    clearError();
   };
 
   const handleChange = (e) => {
@@ -22,7 +69,19 @@ export default function OrgLogin() {
       ...formData,
       [e.target.name]: e.target.value
     });
+    if (error) clearError();
   };
+
+  if (step === 'otp') {
+    return (
+      <OTPVerification
+        email={loginEmail}
+        onVerify={handleOTPVerify}
+        onBack={handleBackToLogin}
+        loading={otpLoading}
+      />
+    );
+  }
 
   return (
     <div style={{
@@ -42,7 +101,7 @@ export default function OrgLogin() {
         boxShadow: '0 10px 25px rgba(0, 0, 0, 0.1)'
       }}>
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <Building style={{ 
+          <Building2 style={{ 
             color: '#2563eb', 
             width: '48px', 
             height: '48px', 
@@ -60,51 +119,22 @@ export default function OrgLogin() {
             Sign in to your organization account
           </p>
         </div>
+
+        {error && (
+          <div style={{
+            padding: '12px',
+            backgroundColor: '#fef2f2',
+            border: '1px solid #fecaca',
+            borderRadius: '8px',
+            marginBottom: '1rem'
+          }}>
+            <p style={{ color: '#dc2626', fontSize: '0.875rem', margin: 0 }}>
+              {error}
+            </p>
+          </div>
+        )}
         
         <form onSubmit={handleSubmit} style={{ marginBottom: '1rem' }}>
-          <div style={{ marginBottom: '1rem' }}>
-            <label htmlFor="orgCode" style={{
-              display: 'block',
-              fontSize: '0.875rem',
-              fontWeight: '500',
-              color: '#374151',
-              marginBottom: '0.5rem'
-            }}>
-              Organization Code
-            </label>
-            <div style={{ position: 'relative' }}>
-              <input
-                id="orgCode"
-                name="orgCode"
-                type="text"
-                required
-                style={{
-                  width: '100%',
-                  padding: '12px 12px 12px 40px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '8px',
-                  fontSize: '1rem',
-                  outline: 'none',
-                  transition: 'border-color 0.2s',
-                }}
-                placeholder="Enter organization code"
-                value={formData.orgCode}
-                onChange={handleChange}
-                onFocus={(e) => e.target.style.borderColor = '#2563eb'}
-                onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
-              />
-              <Building style={{
-                position: 'absolute',
-                left: '12px',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                width: '20px',
-                height: '20px',
-                color: '#9ca3af'
-              }} />
-            </div>
-          </div>
-          
           <div style={{ marginBottom: '1rem' }}>
             <label htmlFor="email" style={{
               display: 'block',
@@ -113,7 +143,7 @@ export default function OrgLogin() {
               color: '#374151',
               marginBottom: '0.5rem'
             }}>
-              Email Address
+              Business Email Address
             </label>
             <div style={{ position: 'relative' }}>
               <input
@@ -130,7 +160,7 @@ export default function OrgLogin() {
                   outline: 'none',
                   transition: 'border-color 0.2s',
                 }}
-                placeholder="Enter your email"
+                placeholder="Enter your business email"
                 value={formData.email}
                 onChange={handleChange}
                 onFocus={(e) => e.target.style.borderColor = '#2563eb'}
@@ -194,40 +224,78 @@ export default function OrgLogin() {
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'flex-end',
+            justifyContent: 'space-between',
             marginBottom: '1.5rem',
             fontSize: '0.875rem'
           }}>
-            <a href="#" style={{
-              color: '#2563eb',
-              textDecoration: 'none',
-              fontWeight: '500'
-            }}>
-              Forgot your password?
-            </a>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <input
+                id="remember-me"
+                name="remember-me"
+                type="checkbox"
+                style={{
+                  width: '16px',
+                  height: '16px',
+                  marginRight: '8px',
+                  accentColor: '#2563eb'
+                }}
+              />
+              <label htmlFor="remember-me" style={{ color: '#111827' }}>
+                Remember me
+              </label>
+            </div>
+
+            <div>
+              <a href="#" style={{
+                color: '#2563eb',
+                textDecoration: 'none',
+                fontWeight: '500'
+              }}>
+                Forgot password?
+              </a>
+            </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <Button
+            <button
               type="submit"
+              disabled={loading}
               style={{
                 width: '100%',
-                backgroundColor: '#2563eb',
+                backgroundColor: loading ? '#9ca3af' : '#2563eb',
                 color: 'white',
                 padding: '12px',
                 fontSize: '1rem',
                 fontWeight: '500',
                 borderRadius: '8px',
                 border: 'none',
-                cursor: 'pointer'
+                cursor: loading ? 'not-allowed' : 'pointer',
+                transition: 'background-color 0.2s'
               }}
             >
-              Sign In to Organization
-            </Button>
+              {loading ? 'Signing In...' : 'Sign In'}
+            </button>
             
-            <Button
+            <div style={{ textAlign: 'center', fontSize: '0.875rem' }}>
+              <span style={{ color: '#6b7280' }}>Don't have an account? </span>
+              <button
+                type="button"
+                onClick={() => navigate('/signup/org')}
+                style={{
+                  color: '#2563eb',
+                  textDecoration: 'none',
+                  fontWeight: '500',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                Register
+              </button>
+            </div>
+            
+            <button
               type="button"
-              variant="outline"
               onClick={() => navigate('/')}
               style={{
                 width: '100%',
@@ -237,13 +305,43 @@ export default function OrgLogin() {
                 padding: '12px',
                 fontSize: '1rem',
                 borderRadius: '8px',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                transition: 'background-color 0.2s'
               }}
+              onMouseOver={(e) => e.target.style.backgroundColor = '#f9fafb'}
+              onMouseOut={(e) => e.target.style.backgroundColor = 'white'}
             >
               Back to Home
-            </Button>
+            </button>
           </div>
         </form>
+
+        <div style={{ 
+          textAlign: 'center', 
+          marginTop: '1rem',
+          padding: '1rem',
+          backgroundColor: '#f3f4f6',
+          borderRadius: '8px',
+          fontSize: '0.75rem',
+          color: '#6b7280'
+        }}>
+          <p style={{ margin: 0 }}>
+            For individuals, please use the{' '}
+            <button
+              onClick={() => navigate('/login/user')}
+              style={{
+                color: '#2563eb',
+                textDecoration: 'underline',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontWeight: '500'
+              }}
+            >
+              Individual Login
+            </button>
+          </p>
+        </div>
       </div>
     </div>
   );
