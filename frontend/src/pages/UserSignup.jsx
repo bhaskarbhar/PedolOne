@@ -120,7 +120,7 @@ export default function UserSignup() {
               {formData.email}
             </p>
             <p style={{ color: '#6b7280', fontSize: '0.875rem' }}>
-              Please check your email and click the verification link to activate your account.
+              Please check your email inbox and if not found check in spam. Click the verification link to activate your account.
             </p>
           </div>
           

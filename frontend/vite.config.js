@@ -17,5 +17,4 @@ export default defineConfig({
       '/policy': 'http://localhost:8000',
     },
   },
-  base: process.env.VITE_BASE_PATH || "/bhaskarbhar/PedolOne/tree/main/frontend"
 })
