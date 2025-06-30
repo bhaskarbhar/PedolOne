@@ -1,0 +1,131 @@
+{
+  "contract_id": "contract_stockbroker_2025",
+  "organization_id": "stockbrokerx_001",
+  "organization_name": "StockBrokerX",
+  "created_at": "2025-06-01T00:00:00Z",
+  "ends_at": "2026-06-01T00:00:00Z",
+  "resources_allowed": [
+    {
+      "resource_name": "aadhaar",
+      "purpose": [
+        "KYC verification",
+        "Identity validation"
+      ],
+      "retention_window": "30 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-07-01T00:00:00Z",
+      "signature": "f4b3a65fda5c3d3f3be92ac11e1c4a50ecafc02b58a3fc4718168ea7f55273c1"
+    },
+    {
+      "resource_name": "pan",
+      "purpose": [
+        "Tax compliance",
+        "Income verification",
+        "KYC"
+      ],
+      "retention_window": "30 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-07-01T00:00:00Z",
+      "signature": "3ad4f9ff8ecf2f5c8c5fa4ebfbc20c2557350d40f8896de8cc25ae4aa027bb8d"
+    },
+    {
+      "resource_name": "account",
+      "purpose": [
+        "Account verification",
+        "Loan disbursement"
+      ],
+      "retention_window": "60 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-08-01T00:00:00Z",
+      "signature": "9ea9645f2957d4241f09a0dbe59cb23c3d202d3bbba344b896f9b6d43891e4c1"
+    },
+    {
+      "resource_name": "ifsc",
+      "purpose": [
+        "Bank branch verification",
+        "Fund transfer routing"
+      ],
+      "retention_window": "15 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-06-16T00:00:00Z",
+      "signature": "723b03400f93cb0bc9f0578f86cfb95a2b2b6a4ed705da9cfad46c8e1dc75f1c"
+    },
+    {
+      "resource_name": "creditcard",
+      "purpose": [
+        "Credit profiling",
+        "Fraud risk analysis"
+      ],
+      "retention_window": "10 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-06-11T00:00:00Z",
+      "signature": "bf4b2eec8496a8e0cd9c12817756041d5dfd92f2ac3f89746a3ffb91e7983180"
+    },
+    {
+      "resource_name": "debitcard",
+      "purpose": [
+        "Spending analysis",
+        "Account validation"
+      ],
+      "retention_window": "10 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-06-11T00:00:00Z",
+      "signature": "504b44a2c4ae19cb558c03ab0d13b257f80b34c3c649cf803779e4e118b6dd59"
+    },
+    {
+      "resource_name": "gst",
+      "purpose": [
+        "Business KYC",
+        "Financial eligibility analysis"
+      ],
+      "retention_window": "20 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-06-21T00:00:00Z",
+      "signature": "a805b33a8c9c54e64dc7f10fe826ff54613f53b5ec69373935b75a16a40c6e23"
+    },
+    {
+      "resource_name": "itform16",
+      "purpose": [
+        "Income validation",
+        "Loan underwriting"
+      ],
+      "retention_window": "45 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-07-16T00:00:00Z",
+      "signature": "65c823dc31f6b5f74b771f37ef10a444798942d1a967c97973cc0cfe2b80bfcf"
+    },
+    {
+      "resource_name": "upi",
+      "purpose": [
+        "Digital payment mapping",
+        "Fraud detection"
+      ],
+      "retention_window": "7 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-06-08T00:00:00Z",
+      "signature": "e042fb441a23a1094efb59cb282d56d2521fa112d49b9a0342070fdfe5cbf658"
+    },
+    {
+      "resource_name": "passport",
+      "purpose": [
+        "Cross-border KYC",
+        "Identity verification"
+      ],
+      "retention_window": "30 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-07-01T00:00:00Z",
+      "signature": "1b768af2a8a4fd901f32fc51c9b2f88dfc9eb37db8e50e3210f560fdfd43512a"
+    },
+    {
+      "resource_name": "drivinglicense",
+      "purpose": [
+        "KYC",
+        "Alternate identity proof"
+      ],
+      "retention_window": "30 days",
+      "created_at": "2025-06-01T00:00:00Z",
+      "ends_at": "2025-07-01T00:00:00Z",
+      "signature": "ac5bb86d429a356a30f3a0a7bc9b9933488262ec16024cce66dcd34be74b103e"
+    }
+  ]
+} 

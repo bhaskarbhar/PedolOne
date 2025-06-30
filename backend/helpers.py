@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import hashlib
 import uuid
 import re
@@ -7,11 +10,18 @@ import base64
 from typing import Optional
 import os
 from pymongo import MongoClient
+from cryptography.fernet import Fernet
 
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017/")
 client = MongoClient(MONGO_URL)
 db = client.PedolOne
 users_collection = db.users
+user_pii_collection = db.user_pii
+
+FERNET_KEY = os.getenv("FERNET_KEY")
+if not FERNET_KEY:
+    raise Exception("FERNET_KEY not set in environment variables")
+fernet = Fernet(FERNET_KEY)
 
 def token_sha3(data: str) -> str:
     return hashlib.sha3_256(data.encode()).hexdigest()
@@ -88,3 +98,9 @@ def generate_policy_signature(data: str, secret_key: Optional[str] = None) -> st
         secret_key = os.getenv("POLICY_SECRET_KEY")
     signature = hmac.new(secret_key.encode(), data.encode(), hashlib.sha256).digest()
     return base64.b64encode(signature).decode()
+
+def encrypt_pii(plain: str) -> str:
+    return fernet.encrypt(plain.encode()).decode()
+
+def decrypt_pii(token: str) -> str:
+    return fernet.decrypt(token.encode()).decode()

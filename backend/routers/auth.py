@@ -12,13 +12,16 @@ from dotenv import load_dotenv
 import secrets
 import uuid
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, EmailStr
 
 from models import (
     UserRegistration, UserLogin, OTPVerification, LoginVerification, 
-    User, Token, TokenData, UserResponse, LoginResponse, RegisterResponse
+    User, Token, TokenData, UserResponse, LoginResponse, RegisterResponse,
+    UserPIIEntry, UserPIIMap, PIIInput
 )
 from jwt_utils import create_access_token, get_current_user, get_token_expiry_time
-from helpers import users_collection
+from helpers import users_collection, user_pii_collection, encrypt_pii, decrypt_pii
+from routers.pii_tokenizer import tokenize_aadhaar, tokenize_pan
 
 # Load environment variables
 load_dotenv()
@@ -509,22 +512,20 @@ async def get_user(user_id: int, current_user: TokenData = Depends(get_current_u
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(current_user: TokenData = Depends(get_current_user)):
     """Get current user information from JWT token"""
-    
     print(f"🔍 DEBUG: /auth/me called for user: {current_user.email} (ID: {current_user.user_id})")
-    
     try:
         user = users_collection.find_one({"userid": current_user.user_id})
         if not user:
             print(f"❌ DEBUG: User not found in database for ID: {current_user.user_id}")
             raise HTTPException(status_code=404, detail="User not found")
-        
+
         print(f"✅ DEBUG: User found in database")
         print(f"🔍 DEBUG: User document keys: {list(user.keys())}")
         print(f"🔍 DEBUG: User document: {user}")
-        
+
         # Handle missing username field - use email or full_name as fallback
         username = user.get("username") or user.get("email").split("@")[0] or "user"
-        
+
         user_response = UserResponse(
             userid=user["userid"],
             username=username,
@@ -535,10 +536,10 @@ async def get_current_user_info(current_user: TokenData = Depends(get_current_us
             email_verified=user["email_verified"],
             created_at=user["created_at"]
         )
-        
+
         print(f"🎉 DEBUG: Successfully created UserResponse for: {username}")
         return user_response
-        
+
     except Exception as e:
         print(f"❌ DEBUG: Error in /auth/me: {str(e)}")
         print(f"❌ DEBUG: Error type: {type(e)}")
@@ -568,3 +569,56 @@ async def refresh_token(current_user: TokenData = Depends(get_current_user)):
         user_id=user["userid"],
         email=user["email"]
     ) 
+
+@router.post("/user-pii/add")
+async def add_user_pii(user_id: int, resource: str, pii_value: str):
+    """Add or update a user's PII (encrypt, tokenize, store)"""
+    from datetime import datetime
+    # Tokenize
+    if resource == "aadhaar":
+        token = tokenize_aadhaar(PIIInput(pii_value=pii_value))["token"]
+    elif resource == "pan":
+        token = tokenize_pan(PIIInput(pii_value=pii_value))["token"]
+    else:
+        return {"error": "Unsupported resource type"}
+    # Encrypt
+    encrypted = encrypt_pii(pii_value)
+    entry = {
+        "resource": resource,
+        "original": encrypted,
+        "token": token,
+        "created_at": datetime.utcnow()
+    }
+    # Upsert
+    user_pii_collection.update_one(
+        {"user_id": user_id, "pii.resource": {"$ne": resource}},
+        {"$push": {"pii": entry}},
+        upsert=True
+    )
+    user_pii_collection.update_one(
+        {"user_id": user_id, "pii.resource": resource},
+        {"$set": {"pii.$": entry}},
+        upsert=True
+    )
+    return {"status": "success", "resource": resource, "token": token}
+
+@router.get("/user-pii/{user_id}")
+async def get_user_pii(user_id: int):
+    """Fetch all PII for a user (admin/internal use)"""
+    doc = user_pii_collection.find_one({"user_id": user_id})
+    if not doc:
+        return {"pii": []}
+    # Decrypt originals for internal use
+    pii = [
+        {**entry, "original": decrypt_pii(entry["original"])}
+        for entry in doc.get("pii", [])
+    ]
+    return {"user_id": user_id, "pii": pii}
+
+class EmailCheckRequest(BaseModel):
+    email: EmailStr
+
+@router.post("/check-email")
+def check_email(data: EmailCheckRequest):
+    user = users_collection.find_one({"email": data.email})
+    return {"exists": bool(user)} 
