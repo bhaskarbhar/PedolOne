@@ -103,3 +103,14 @@ class Policy(BaseModel):
         populate_by_name=True,
         json_encoders={ObjectId: str}
     )
+
+# --- User PII Mapping Model ---
+class UserPIIEntry(BaseModel):
+    resource: str
+    original: str  # Fernet-encrypted PII
+    token: str     # Tokenized PII
+    created_at: datetime
+
+class UserPIIMap(BaseModel):
+    user_id: int
+    pii: list[UserPIIEntry]
