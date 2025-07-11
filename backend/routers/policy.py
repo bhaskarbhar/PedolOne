@@ -6,6 +6,7 @@ from fastapi.encoders import jsonable_encoder
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from models import PIIInput
+from typing import Optional
 
 from helpers import generate_policy_signature
 from routers.pii_tokenizer import (
@@ -24,6 +25,9 @@ client = MongoClient(MONGO_URL)
 db = client.get_database("PedolOne")
 policies_collection = db.get_collection("policy")
 policies_collection.create_index("expiry", expireAfterSeconds=0)
+
+# New: logs collection for audit logs
+logs_collection = db.get_collection("logs")
 
 with open("routers/contract.json") as f:
     contract = json.load(f)
@@ -44,7 +48,7 @@ TOKENIZER_MAP = {
 }
 
 @router.post("/input")
-def create_policy(data: UserInputPII, user_id: int = None, contract_override: dict = None):
+def create_policy(data: UserInputPII, user_id: int, contract_override: Optional[dict] = None):
     pii_value = data.pii_value.strip()
     resource = data.resource.strip().lower()
 
@@ -92,6 +96,17 @@ def create_policy(data: UserInputPII, user_id: int = None, contract_override: di
     result = policies_collection.insert_one(policy_data)
     policy_data["_id"] = str(result.inserted_id)  # ✅ convert ObjectId to str
 
+    # New: Write to logs collection if user_id is provided
+    if user_id is not None:
+        log_entry = {
+            "user_id": user_id,
+            "shared_with": use_contract["organization_name"],
+            "resource_name": resource,
+            "purpose": matched["purpose"] if isinstance(matched["purpose"], list) else [matched["purpose"]],
+            "created_at": created_at
+        }
+        logs_collection.insert_one(log_entry)
+
     return jsonable_encoder(policy_data)  # now safe to encode
 
 @router.get("/user/{user_id}/active")
@@ -115,19 +130,57 @@ def get_user_active_policies(user_id: int):
 @router.get("/user/{user_id}/logs")
 def get_user_access_logs(user_id: int, limit: int = 10):
     """Get recent access logs for a user's PII"""
-    # For now, we'll use policies as access logs
-    # In production, you'd want a separate collection for actual access logs
-    logs = list(policies_collection.find(
+    logs = list(logs_collection.find(
         {"user_id": user_id},
         sort=[("created_at", -1)],
         limit=limit
     ))
-    
     # Convert ObjectId to string and format dates
     for log in logs:
         log["_id"] = str(log["_id"])
         log["created_at"] = log["created_at"].isoformat()
-        if "expiry" in log:
-            log["expiry"] = log["expiry"].isoformat()
-    
+        # For frontend compatibility: always provide fintechName
+        log["fintechName"] = log.get("shared_with") or log.get("fintech_name")
     return jsonable_encoder(logs)
+
+@router.get("/contract/{contract_id}/unique_users")
+def get_unique_users_for_contract(contract_id: str):
+    """Return the number of unique users for a given contract_id."""
+    unique_user_ids = policies_collection.distinct("user_id", {"contract_id": contract_id})
+    return {"unique_user_count": len(unique_user_ids)}
+
+@router.get("/contract/{contract_id}/active_policies_count")
+def get_active_policies_count(contract_id: str):
+    """Return the number of non-expired policies for the given contract_id."""
+    current_time = datetime.utcnow()
+    count = policies_collection.count_documents({
+        "contract_id": contract_id,
+        "expiry": {"$gt": current_time}
+    })
+    return {"active_policies_count": count}
+
+@router.get("/contract/{contract_id}/data_categories")
+def get_data_categories_for_contract(contract_id: str):
+    """Return data categories (resource_name), their counts, and percentage of users for a contract."""
+    # Get all policies for the contract
+    pipeline = [
+        {"$match": {"contract_id": contract_id}},
+        {"$group": {"_id": "$resource_name", "count": {"$sum": 1}}}
+    ]
+    resource_counts = list(policies_collection.aggregate(pipeline))
+    # Get total unique users for the contract
+    unique_user_ids = policies_collection.distinct("user_id", {"contract_id": contract_id})
+    total_users = len(unique_user_ids) or 1  # avoid division by zero
+    # Build response
+    categories = []
+    for rc in resource_counts:
+        percentage = round((rc["count"] / total_users) * 100, 1)
+        categories.append({
+            "name": rc["_id"],
+            "count": rc["count"],
+            "percentage": percentage,
+            "unique_users": total_users
+        })
+    return {"data_categories": categories}
+
+

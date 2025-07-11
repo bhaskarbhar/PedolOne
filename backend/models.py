@@ -114,3 +114,22 @@ class UserPIIEntry(BaseModel):
 class UserPIIMap(BaseModel):
     user_id: int
     pii: list[UserPIIEntry]
+
+# --- Audit Log Model ---
+class LogEntry(BaseModel):
+    id: Optional[ObjectId] = Field(default=None, alias="_id")
+    user_id: int
+    fintech_name: str
+    resource_name: str
+    purpose: list[str]
+    created_at: datetime
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        populate_by_name=True,
+        json_encoders={ObjectId: str}
+    )
+
+class UserAccessLog(BaseModel):
+    user_id: int
+    logs: list[LogEntry]

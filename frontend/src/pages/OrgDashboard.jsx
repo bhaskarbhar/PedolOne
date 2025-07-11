@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Building2, 
@@ -20,12 +20,66 @@ import {
 export default function OrgDashboard() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
+  const [totalUsers, setTotalUsers] = useState(0);
+  const [activeConsents, setActiveConsents] = useState(0);
+  const [dataCategories, setDataCategories] = useState([]);
+  const [searchUserId, setSearchUserId] = useState('');
+  const [searchedUserId, setSearchedUserId] = useState(null);
+  const [userPolicies, setUserPolicies] = useState([]);
+  const [showUserDetails, setShowUserDetails] = useState(false);
+
+  useEffect(() => {
+    // Fetch unique user count for contract_stockbroker_2025
+    fetch('http://localhost:8000/policy/contract/contract_stockbroker_2025/unique_users')
+      .then(res => res.json())
+      .then(data => {
+        setTotalUsers(data.unique_user_count || 0);
+      })
+      .catch(() => setTotalUsers(0));
+
+    // Fetch active consents count for contract_stockbroker_2025
+    fetch('http://localhost:8000/policy/contract/contract_stockbroker_2025/active_policies_count')
+      .then(res => res.json())
+      .then(data => {
+        setActiveConsents(data.active_policies_count || 0);
+      })
+      .catch(() => setActiveConsents(0));
+
+    // Fetch data categories for contract_stockbroker_2025
+    fetch('http://localhost:8000/policy/contract/contract_stockbroker_2025/data_categories')
+      .then(res => res.json())
+      .then(data => {
+        setDataCategories(data.data_categories || []);
+      })
+      .catch(() => setDataCategories([]));
+  }, []);
+
+  const handleUserSearch = (e) => {
+    e.preventDefault();
+    setSearchedUserId(searchUserId);
+    setShowUserDetails(false);
+    setUserPolicies([]);
+  };
+
+  const handleShowDetails = () => {
+    if (!searchedUserId) return;
+    fetch(`http://localhost:8000/policy/user/${searchedUserId}/active`)
+      .then(res => res.json())
+      .then(data => {
+        setUserPolicies(data || []);
+        setShowUserDetails(true);
+      })
+      .catch(() => {
+        setUserPolicies([]);
+        setShowUserDetails(true);
+      });
+  };
 
   // Mock data for organization dashboard
   const orgData = {
     orgId: user?.organization_id || 'ORG-12345',
-    totalUsers: 1247,
-    activeConsents: 89,
+    totalUsers: totalUsers,
+    activeConsents: activeConsents,
     dataRequests: 23,
     complianceScore: 98.5,
     monthlyActivity: '+12%'
@@ -64,14 +118,6 @@ export default function OrgDashboard() {
       timestamp: '30 minutes ago',
       status: 'success'
     }
-  ];
-
-  const dataCategories = [
-    { name: 'Personal Information', count: 1247, percentage: 100 },
-    { name: 'Financial Data', count: 892, percentage: 71.5 },
-    { name: 'Employment Details', count: 1156, percentage: 92.7 },
-    { name: 'Credit Information', count: 734, percentage: 58.8 },
-    { name: 'Transaction History', count: 567, percentage: 45.5 }
   ];
 
   const complianceMetrics = [
@@ -395,7 +441,7 @@ export default function OrgDashboard() {
                           {category.name}
                         </span>
                         <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-                          {category.count} users ({category.percentage}%)
+                          {category.unique_users} users ({category.percentage}%)
                         </span>
                       </div>
                       <div style={{
@@ -423,17 +469,66 @@ export default function OrgDashboard() {
                 <h3 style={{ fontSize: '1.25rem', fontWeight: '600', color: '#111827', marginBottom: '1rem' }}>
                   User Management
                 </h3>
-                <div style={{
-                  padding: '2rem',
-                  textAlign: 'center',
-                  color: '#6b7280'
-                }}>
-                  <Users size={48} style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
-                  <p>User management features coming soon...</p>
-                  <p style={{ fontSize: '0.875rem' }}>
-                    This section will include user consent management, data access controls, and user activity monitoring.
-                  </p>
-                </div>
+                <form onSubmit={handleUserSearch} style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem' }}>
+                  <input
+                    type="text"
+                    placeholder="Enter User ID"
+                    value={searchUserId}
+                    onChange={e => setSearchUserId(e.target.value)}
+                    style={{ padding: '0.5rem 1rem', border: '1px solid #e5e7eb', borderRadius: '6px', fontSize: '1rem' }}
+                  />
+                  <button
+                    type="submit"
+                    style={{ padding: '0.5rem 1.5rem', backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '6px', fontWeight: '500', cursor: 'pointer' }}
+                  >
+                    Search
+                  </button>
+                </form>
+                {searchedUserId && !showUserDetails && (
+                  <button
+                    onClick={handleShowDetails}
+                    style={{ padding: '0.5rem 1.5rem', backgroundColor: '#059669', color: 'white', border: 'none', borderRadius: '6px', fontWeight: '500', cursor: 'pointer', marginBottom: '1rem' }}
+                  >
+                    Show Details for User ID: {searchedUserId}
+                  </button>
+                )}
+                {showUserDetails && (
+                  <div style={{ marginTop: '1rem' }}>
+                    <h4 style={{ fontWeight: '600', color: '#2563eb', marginBottom: '0.5rem' }}>Policy Details for User ID: {searchedUserId}</h4>
+                    {userPolicies.length === 0 ? (
+                      <p style={{ color: '#d97706' }}>No active policies found for this user.</p>
+                    ) : (
+                      <table style={{ width: '100%', borderCollapse: 'collapse', background: 'white', borderRadius: '8px', overflow: 'hidden' }}>
+                        <thead>
+                          <tr style={{ background: '#f3f4f6' }}>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>Resource</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>Purpose</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>Shared With</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>Contract ID</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>Retention</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>Created At</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>Expiry</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>Signature</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {userPolicies.map((policy, idx) => (
+                            <tr key={idx}>
+                              <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>{policy.resource_name}</td>
+                              <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>{Array.isArray(policy.purpose) ? policy.purpose.join(', ') : policy.purpose}</td>
+                              <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>{policy.shared_with}</td>
+                              <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>{policy.contract_id}</td>
+                              <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>{policy.retention_window}</td>
+                              <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>{policy.created_at}</td>
+                              <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>{policy.expiry}</td>
+                              <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', wordBreak: 'break-all' }}>{policy.signature}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
