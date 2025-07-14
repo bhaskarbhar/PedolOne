@@ -20,6 +20,7 @@ class UserRegistration(BaseModel):
     phone_number: str = Field(..., min_length=10, max_length=15)
     password: str = Field(..., min_length=8)
     user_type: str = Field(default="individual")  # "individual" or "organization"
+    organization_id: Optional[str] = None  # For organization admins
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -41,6 +42,7 @@ class User(BaseModel):
     phone_number: str
     password_hash: str
     user_type: str = "individual"  # "individual" or "organization"
+    organization_id: Optional[str] = None  # For organization admins
     email_verified: bool = False
     created_at: Optional[datetime] = None
     email_otp: Optional[str] = None
@@ -71,6 +73,7 @@ class UserResponse(BaseModel):
     email: str
     phone_number: str
     user_type: str
+    organization_id: Optional[str] = None
     email_verified: bool
     created_at: datetime
 
@@ -85,6 +88,19 @@ class RegisterResponse(BaseModel):
     user_id: int
     email_status: str
 
+# --- Organization Models ---
+class Organization(BaseModel):
+    org_id: str
+    org_name: str
+    contract_id: str
+    created_at: datetime
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        populate_by_name=True,
+        json_encoders={ObjectId: str}
+    )
+
 # --- Policy Model ---
 class Policy(BaseModel):
     id: Optional[ObjectId] = Field(default=None, alias="_id")
@@ -97,6 +113,9 @@ class Policy(BaseModel):
     created_at: datetime
     expiry: datetime
     signature: str
+    user_id: int  # User who owns the data
+    source_org_id: Optional[str] = None  # Organization that originally received the data
+    target_org_id: Optional[str] = None  # Organization that data is shared with
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -122,6 +141,11 @@ class LogEntry(BaseModel):
     fintech_name: str
     resource_name: str
     purpose: list[str]
+    log_type: str = "consent"  # "consent" or "data_access"
+    ip_address: Optional[str] = None
+    data_source: str = "individual"  # "individual" or "organization"
+    source_org_id: Optional[str] = None  # For inter-org sharing
+    target_org_id: Optional[str] = None  # For inter-org sharing
     created_at: datetime
 
     model_config = ConfigDict(
@@ -133,3 +157,95 @@ class LogEntry(BaseModel):
 class UserAccessLog(BaseModel):
     user_id: int
     logs: list[LogEntry]
+
+# --- Data Access Request Models ---
+class DataAccessRequest(BaseModel):
+    id: Optional[ObjectId] = Field(default=None, alias="_id")
+    request_id: str
+    requester_org_id: str
+    requester_org_name: str
+    target_user_id: int
+    target_user_email: str
+    requested_resources: List[str]  # List of PII types requested
+    purpose: List[str]
+    retention_window: str
+    status: str = "pending"  # "pending", "approved", "rejected", "expired"
+    request_message: Optional[str] = None
+    response_message: Optional[str] = None
+    created_at: datetime
+    expires_at: datetime
+    responded_at: Optional[datetime] = None
+    responded_by: Optional[int] = None  # User ID who responded
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        populate_by_name=True,
+        json_encoders={ObjectId: str}
+    )
+
+class CreateDataRequest(BaseModel):
+    target_user_email: str
+    requested_resources: List[str]
+    purpose: List[str]
+    retention_window: str = "30 days"
+    request_message: Optional[str] = None
+
+class RespondToRequest(BaseModel):
+    request_id: str
+    status: str  # "approved" or "rejected"
+    response_message: Optional[str] = None
+
+# --- Inter-Organization Contract Models ---
+class InterOrgContract(BaseModel):
+    id: Optional[ObjectId] = Field(default=None, alias="_id")
+    contract_id: str
+    source_org_id: str
+    source_org_name: str
+    target_org_id: str
+    target_org_name: str
+    contract_type: str = "data_sharing"  # "data_sharing", "service_provider", etc.
+    allowed_resources: List[str]
+    purposes: List[str]
+    retention_window: str
+    data_flow_direction: str = "bidirectional"  # "unidirectional", "bidirectional"
+    created_at: datetime
+    expires_at: datetime
+    status: str = "active"  # "active", "expired", "terminated"
+    signature: str
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        populate_by_name=True,
+        json_encoders={ObjectId: str}
+    )
+
+class CreateInterOrgContract(BaseModel):
+    target_org_id: str
+    contract_type: str = "data_sharing"
+    allowed_resources: List[str]
+    purposes: List[str]
+    retention_window: str = "30 days"
+    data_flow_direction: str = "bidirectional"
+
+# --- Organization User Management Models ---
+class OrgUserSummary(BaseModel):
+    user_id: int
+    username: str
+    full_name: str
+    email: str
+    phone_number: str
+    shared_resources: List[str]
+    active_policies_count: int
+    last_consent_date: Optional[datetime] = None
+    total_data_access_count: int
+
+class OrgUserDetail(BaseModel):
+    user_id: int
+    username: str
+    full_name: str
+    email: str
+    phone_number: str
+    shared_resources: List[str]
+    policies: List[dict]
+    pii_data: List[dict]
+    consent_history: List[dict]

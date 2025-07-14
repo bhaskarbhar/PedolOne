@@ -1,7 +1,51 @@
 import React from 'react';
-import { Shield, Clock } from 'lucide-react';
+import { Shield, Clock, Eye, Globe, CheckCircle, Database, Users, Building2 } from 'lucide-react';
 
 const AuditLogTable = ({ logs }) => {
+  const getLogTypeIcon = (logType) => {
+    switch (logType) {
+      case 'consent':
+        return <CheckCircle size={14} className="text-green-500" />;
+      case 'data_access':
+        return <Eye size={14} className="text-blue-500" />;
+      default:
+        return <Database size={14} className="text-gray-500" />;
+    }
+  };
+
+  const getLogTypeLabel = (logType) => {
+    switch (logType) {
+      case 'consent':
+        return 'Consent Granted';
+      case 'data_access':
+        return 'Data Accessed';
+      default:
+        return logType;
+    }
+  };
+
+  const getDataSourceIcon = (dataSource) => {
+    switch (dataSource) {
+      case 'individual':
+        return <Users size={14} className="text-purple-500" />;
+      case 'organization':
+        return <Building2 size={14} className="text-orange-500" />;
+      default:
+        return <Database size={14} className="text-gray-500" />;
+    }
+  };
+
+  const getDataSourceLabel = (dataSource) => {
+    switch (dataSource) {
+      case 'individual':
+        return 'Individual User';
+      case 'organization':
+        return 'Organization';
+      default:
+        return dataSource;
+    }
+  };
+
   return (
     <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
@@ -12,6 +56,12 @@ const AuditLogTable = ({ logs }) => {
                 Date & Time
               </th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Type
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Data Source
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Fintech Name
               </th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -19,6 +69,9 @@ const AuditLogTable = ({ logs }) => {
               </th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Purpose
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                IP Address
               </th>
             </tr>
           </thead>
@@ -29,6 +82,22 @@ const AuditLogTable = ({ logs }) => {
                   <div className="flex items-center text-sm text-gray-900">
                     <Clock size={14} className="mr-2 text-gray-400" />
                     {log.date}
+                  </div>
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <div className="flex items-center">
+                    {getLogTypeIcon(log.type)}
+                    <span className="ml-2 text-sm font-medium text-gray-900">
+                      {getLogTypeLabel(log.type)}
+                    </span>
+                  </div>
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <div className="flex items-center">
+                    {getDataSourceIcon(log.dataSource)}
+                    <span className="ml-2 text-sm font-medium text-gray-900">
+                      {getDataSourceLabel(log.dataSource)}
+                    </span>
                   </div>
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap">
@@ -45,6 +114,12 @@ const AuditLogTable = ({ logs }) => {
                 <td className="px-4 py-3">
                   <div className="text-sm text-gray-600 max-w-xs truncate">
                     {log.purpose}
+                  </div>
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <div className="flex items-center text-sm text-gray-600">
+                    <Globe size={14} className="mr-2 text-gray-400" />
+                    {log.ipAddress}
                   </div>
                 </td>
               </tr>

@@ -1,6 +1,8 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Dict, List
 import json
+from datetime import datetime
+from pymongo import MongoClient
 
 router = APIRouter()
 
@@ -33,6 +35,11 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# MongoDB client and collection
+client = MongoClient("mongodb://localhost:27017/")
+db = client["PedolOne"]
+logs_collection = db["logs"]
+
 @router.websocket("/ws/user/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
     await manager.connect(websocket, user_id)
@@ -50,4 +57,36 @@ async def send_user_update(user_id: str, update_type: str, data: dict):
         "type": update_type,
         **data
     }
-    await manager.broadcast_to_user(user_id, message) 
+    await manager.broadcast_to_user(user_id, message)
+
+@router.get("/audit/org/{org_id}")
+async def get_organization_audit_logs(org_id: str):
+    """Get all audit logs for an organization"""
+    # Get logs where this org is the source or target
+    logs = list(logs_collection.find({
+        "$or": [
+            {"source_org_id": org_id},
+            {"target_org_id": org_id}
+        ]
+    }))
+
+    # Sort by created_at (newest first)
+    logs.sort(key=lambda x: x.get("created_at", datetime.min), reverse=True)
+
+    # Format response
+    formatted_logs = []
+    for log in logs:
+        formatted_logs.append({
+            "user_id": log["user_id"],
+            "fintech_name": log["fintech_name"],
+            "resource_name": log["resource_name"],
+            "purpose": log["purpose"],
+            "log_type": log["log_type"],
+            "ip_address": log.get("ip_address"),
+            "data_source": log["data_source"],
+            "source_org_id": log.get("source_org_id"),
+            "target_org_id": log.get("target_org_id"),
+            "created_at": log["created_at"].isoformat()
+        })
+
+    return formatted_logs 

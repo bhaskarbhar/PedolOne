@@ -238,11 +238,15 @@ async def register_user(user_data: UserRegistration):
         "phone_number": user_data.phone_number,
         "password_hash": password_hash,
         "user_type": user_data.user_type,
+        "organization_id": user_data.organization_id,  # Include organization_id
         "email_verified": False,
         "created_at": datetime.utcnow(),
         "verification_token": verification_token,
         "token_created_at": datetime.utcnow()
     }
+    
+    print(f"🔍 DEBUG: Creating user document with organization_id: {user_data.organization_id}")
+    print(f"🔍 DEBUG: User document: {user_doc}")
     
     # Insert user into database
     result = users_collection.insert_one(user_doc)
@@ -273,6 +277,7 @@ async def register_individual_user(user_data: UserRegistration):
 async def register_organization(user_data: UserRegistration):
     """Register a new organization"""
     user_data.user_type = "organization"
+    print(f"🔍 DEBUG: Organization registration - organization_id: {user_data.organization_id}")
     return await register_user(user_data)
 
 @router.get("/verify-email")
@@ -505,6 +510,7 @@ async def get_user(user_id: int, current_user: TokenData = Depends(get_current_u
         email=user["email"],
         phone_number=user["phone_number"],
         user_type=user["user_type"],
+        organization_id=user.get("organization_id"),  # Include organization_id
         email_verified=user["email_verified"],
         created_at=user["created_at"]
     )
@@ -533,6 +539,7 @@ async def get_current_user_info(current_user: TokenData = Depends(get_current_us
             email=user["email"],
             phone_number=user["phone_number"],
             user_type=user["user_type"],
+            organization_id=user.get("organization_id"),  # Include organization_id
             email_verified=user["email_verified"],
             created_at=user["created_at"]
         )
@@ -574,13 +581,36 @@ async def refresh_token(current_user: TokenData = Depends(get_current_user)):
 async def add_user_pii(user_id: int, resource: str, pii_value: str):
     """Add or update a user's PII (encrypt, tokenize, store)"""
     from datetime import datetime
+    from routers.pii_tokenizer import (
+        tokenize_aadhaar, tokenize_pan, tokenize_account, tokenize_ifsc,
+        tokenize_creditcard, tokenize_debitcard, tokenize_gst,
+        tokenize_itform16, tokenize_upi, tokenize_passport, tokenize_dl
+    )
+    
+    # Map resource to tokenizer function
+    TOKENIZER_MAP = {
+        "aadhaar": tokenize_aadhaar,
+        "pan": tokenize_pan,
+        "account": tokenize_account,
+        "ifsc": tokenize_ifsc,
+        "creditcard": tokenize_creditcard,
+        "debitcard": tokenize_debitcard,
+        "gst": tokenize_gst,
+        "itform16": tokenize_itform16,
+        "upi": tokenize_upi,
+        "passport": tokenize_passport,
+        "drivinglicense": tokenize_dl
+    }
+    
     # Tokenize
-    if resource == "aadhaar":
-        token = tokenize_aadhaar(PIIInput(pii_value=pii_value))["token"]
-    elif resource == "pan":
-        token = tokenize_pan(PIIInput(pii_value=pii_value))["token"]
-    else:
-        return {"error": "Unsupported resource type"}
+    if resource not in TOKENIZER_MAP:
+        return {"error": f"Unsupported resource type: {resource}"}
+    
+    try:
+        token = TOKENIZER_MAP[resource](PIIInput(pii_value=pii_value))["token"]
+    except Exception as e:
+        return {"error": f"Invalid {resource} format: {str(e)}"}
+    
     # Encrypt
     encrypted = encrypt_pii(pii_value)
     entry = {
@@ -589,17 +619,28 @@ async def add_user_pii(user_id: int, resource: str, pii_value: str):
         "token": token,
         "created_at": datetime.utcnow()
     }
-    # Upsert
+    
+    # Upsert - first ensure user document exists
     user_pii_collection.update_one(
-        {"user_id": user_id, "pii.resource": {"$ne": resource}},
-        {"$push": {"pii": entry}},
+        {"user_id": user_id},
+        {"$setOnInsert": {"user_id": user_id, "pii": []}},
         upsert=True
     )
+    
+    # Then update the specific PII entry
     user_pii_collection.update_one(
         {"user_id": user_id, "pii.resource": resource},
         {"$set": {"pii.$": entry}},
-        upsert=True
+        upsert=False
     )
+    
+    # If no existing entry was found, add new one
+    user_pii_collection.update_one(
+        {"user_id": user_id, "pii.resource": {"$ne": resource}},
+        {"$push": {"pii": entry}},
+        upsert=False
+    )
+    
     return {"status": "success", "resource": resource, "token": token}
 
 @router.get("/user-pii/{user_id}")

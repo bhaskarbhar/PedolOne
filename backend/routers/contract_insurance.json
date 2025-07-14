@@ -1,6 +1,7 @@
 {
-  "contract_id": "contract_stockbroker_2025",
-  "organization_name": "StockBrokerX",
+  "contract_id": "contract_insurance_2025",
+  "organization_id": "insurancecorp_001",
+  "organization_name": "InsuranceCorp",
   "created_at": "2025-06-01T00:00:00Z",
   "ends_at": "2026-06-01T00:00:00Z",
   "resources_allowed": [
@@ -8,7 +9,8 @@
       "resource_name": "aadhaar",
       "purpose": [
         "KYC verification",
-        "Identity validation"
+        "Identity validation",
+        "Policy holder verification"
       ],
       "retention_window": "30 days",
       "created_at": "2025-06-01T00:00:00Z",
@@ -20,7 +22,8 @@
       "purpose": [
         "Tax compliance",
         "Income verification",
-        "KYC"
+        "KYC",
+        "Premium calculation"
       ],
       "retention_window": "30 days",
       "created_at": "2025-06-01T00:00:00Z",
@@ -31,7 +34,8 @@
       "resource_name": "account",
       "purpose": [
         "Account verification",
-        "Loan disbursement"
+        "Premium collection",
+        "Claim disbursement"
       ],
       "retention_window": "60 days",
       "created_at": "2025-06-01T00:00:00Z",
@@ -42,7 +46,8 @@
       "resource_name": "ifsc",
       "purpose": [
         "Bank branch verification",
-        "Fund transfer routing"
+        "Fund transfer routing",
+        "Premium collection"
       ],
       "retention_window": "15 days",
       "created_at": "2025-06-01T00:00:00Z",
@@ -53,7 +58,8 @@
       "resource_name": "creditcard",
       "purpose": [
         "Credit profiling",
-        "Fraud risk analysis"
+        "Fraud risk analysis",
+        "Premium payment processing"
       ],
       "retention_window": "10 days",
       "created_at": "2025-06-01T00:00:00Z",
@@ -64,7 +70,8 @@
       "resource_name": "debitcard",
       "purpose": [
         "Spending analysis",
-        "Account validation"
+        "Account validation",
+        "Premium payment processing"
       ],
       "retention_window": "10 days",
       "created_at": "2025-06-01T00:00:00Z",
@@ -75,7 +82,8 @@
       "resource_name": "gst",
       "purpose": [
         "Business KYC",
-        "Financial eligibility analysis"
+        "Financial eligibility analysis",
+        "Corporate policy verification"
       ],
       "retention_window": "20 days",
       "created_at": "2025-06-01T00:00:00Z",
@@ -86,7 +94,8 @@
       "resource_name": "itform16",
       "purpose": [
         "Income validation",
-        "Loan underwriting"
+        "Policy underwriting",
+        "Risk assessment"
       ],
       "retention_window": "45 days",
       "created_at": "2025-06-01T00:00:00Z",
@@ -97,7 +106,8 @@
       "resource_name": "upi",
       "purpose": [
         "Digital payment mapping",
-        "Fraud detection"
+        "Fraud detection",
+        "Premium collection"
       ],
       "retention_window": "7 days",
       "created_at": "2025-06-01T00:00:00Z",
@@ -108,7 +118,8 @@
       "resource_name": "passport",
       "purpose": [
         "Cross-border KYC",
-        "Identity verification"
+        "Identity verification",
+        "International policy processing"
       ],
       "retention_window": "30 days",
       "created_at": "2025-06-01T00:00:00Z",
@@ -119,7 +130,8 @@
       "resource_name": "drivinglicense",
       "purpose": [
         "KYC",
-        "Alternate identity proof"
+        "Alternate identity proof",
+        "Motor insurance verification"
       ],
       "retention_window": "30 days",
       "created_at": "2025-06-01T00:00:00Z",
@@ -127,4 +139,4 @@
       "signature": "ac5bb86d429a356a30f3a0a7bc9b9933488262ec16024cce66dcd34be74b103e"
     }
   ]
-}
+} 

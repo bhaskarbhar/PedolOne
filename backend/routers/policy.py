@@ -47,8 +47,8 @@ TOKENIZER_MAP = {
     "drivinglicense": tokenize_dl
 }
 
-@router.post("/input")
-def create_policy(data: UserInputPII, user_id: int, contract_override: Optional[dict] = None):
+def create_policy_internal(data: UserInputPII, user_id: int, ip_address: str = None, contract_override: Optional[dict] = None, source_org_id: str = None, target_org_id: str = None):
+    """Internal function to create policy with additional parameters for inter-org sharing"""
     pii_value = data.pii_value.strip()
     resource = data.resource.strip().lower()
 
@@ -82,10 +82,15 @@ def create_policy(data: UserInputPII, user_id: int, contract_override: Optional[
         "contract_id": use_contract["contract_id"],
         "retention_window": matched["retention_window"],
         "created_at": created_at,
-        "expiry": expiry
+        "expiry": expiry,
+        "user_id": user_id
     }
-    if user_id is not None:
-        policy_data["user_id"] = user_id
+    
+    # Add inter-org sharing fields if provided
+    if source_org_id:
+        policy_data["source_org_id"] = source_org_id
+    if target_org_id:
+        policy_data["target_org_id"] = target_org_id
 
     signature_payload = json.dumps(
         {k: str(v) if isinstance(v, datetime) else v for k, v in policy_data.items()},
@@ -94,20 +99,35 @@ def create_policy(data: UserInputPII, user_id: int, contract_override: Optional[
     policy_data["signature"] = generate_policy_signature(signature_payload)
 
     result = policies_collection.insert_one(policy_data)
-    policy_data["_id"] = str(result.inserted_id)  # ✅ convert ObjectId to str
+    policy_data["_id"] = str(result.inserted_id)
 
-    # New: Write to logs collection if user_id is provided
-    if user_id is not None:
-        log_entry = {
-            "user_id": user_id,
-            "shared_with": use_contract["organization_name"],
-            "resource_name": resource,
-            "purpose": matched["purpose"] if isinstance(matched["purpose"], list) else [matched["purpose"]],
-            "created_at": created_at
-        }
-        logs_collection.insert_one(log_entry)
+    # Write to logs collection
+    log_entry = {
+        "user_id": user_id,
+        "fintech_name": use_contract["organization_name"],
+        "resource_name": resource,
+        "purpose": matched["purpose"] if isinstance(matched["purpose"], list) else [matched["purpose"]],
+        "log_type": "consent",
+        "ip_address": ip_address,
+        "data_source": "individual",
+        "created_at": created_at
+    }
+    
+    # Add inter-org sharing fields to log if provided
+    if source_org_id:
+        log_entry["source_org_id"] = source_org_id
+    if target_org_id:
+        log_entry["target_org_id"] = target_org_id
+        log_entry["data_source"] = "organization"
+    
+    logs_collection.insert_one(log_entry)
 
-    return jsonable_encoder(policy_data)  # now safe to encode
+    return jsonable_encoder(policy_data)
+
+@router.post("/input")
+def create_policy(data: UserInputPII, user_id: int, contract_override: Optional[dict] = None):
+    """Create policy for user consent to organization"""
+    return create_policy_internal(data, user_id, contract_override=contract_override)
 
 @router.get("/user/{user_id}/active")
 def get_user_active_policies(user_id: int):
@@ -182,5 +202,157 @@ def get_data_categories_for_contract(contract_id: str):
             "unique_users": total_users
         })
     return {"data_categories": categories}
+
+@router.get("/org/{org_id}/data_categories")
+async def get_organization_data_categories(org_id: str):
+    """Get data categories for an organization with user counts and percentages"""
+    # Get all policies for this organization
+    policies = list(policies_collection.find({
+        "target_org_id": org_id
+    }))
+    
+    # Count unique users
+    unique_users = len(set([policy["user_id"] for policy in policies]))
+    
+    if unique_users == 0:
+        return []
+    
+    # Group by resource name
+    resource_counts = {}
+    for policy in policies:
+        resource = policy["resource_name"]
+        if resource not in resource_counts:
+            resource_counts[resource] = set()
+        resource_counts[resource].add(policy["user_id"])
+    
+    # Calculate percentages
+    data_categories = []
+    for resource, user_set in resource_counts.items():
+        user_count = len(user_set)
+        percentage = round((user_count / unique_users) * 100, 1)
+        
+        data_categories.append({
+            "name": resource,
+            "unique_users": user_count,
+            "percentage": percentage
+        })
+    
+    # Sort by percentage (highest first)
+    data_categories.sort(key=lambda x: x["percentage"], reverse=True)
+    
+    return data_categories
+
+@router.get("/compliance/org/{org_id}")
+async def get_organization_compliance_metrics(org_id: str):
+    """Get compliance metrics for an organization"""
+    # Get organization details to find the org name
+    from helpers import get_organization_by_id
+    org = get_organization_by_id(org_id)
+    org_name = org["org_name"] if org else org_id
+    
+    # Get all policies for this organization (by ID or name)
+    policies = list(policies_collection.find({
+        "$or": [
+            {"target_org_id": org_id},
+            {"shared_with": org_name}
+        ]
+    }))
+    
+    total_policies = len(policies)
+    active_policies = len([p for p in policies if not p.get("is_revoked", False)])
+    
+    # Calculate compliance metrics
+    metrics = []
+    
+    # Data Processing Consent
+    consent_policies = len([p for p in policies if p.get("consent_given", False)])
+    consent_percentage = round((consent_policies / total_policies * 100), 1) if total_policies > 0 else 0
+    metrics.append({
+        "metric": "Data Processing Consent",
+        "value": f"{consent_percentage}%",
+        "status": "good" if consent_percentage >= 95 else "warning" if consent_percentage >= 80 else "poor"
+    })
+    
+    # Purpose Limitation
+    purpose_limited = len([p for p in policies if p.get("purpose") and len(p["purpose"]) <= 3])
+    purpose_percentage = round((purpose_limited / total_policies * 100), 1) if total_policies > 0 else 0
+    metrics.append({
+        "metric": "Purpose Limitation",
+        "value": f"{purpose_percentage}%",
+        "status": "good" if purpose_percentage >= 90 else "warning" if purpose_percentage >= 75 else "poor"
+    })
+    
+    # Data Minimization
+    minimized = len([p for p in policies if p.get("resource_name") in ["aadhaar", "pan", "account"]])
+    minimization_percentage = round((minimized / total_policies * 100), 1) if total_policies > 0 else 0
+    metrics.append({
+        "metric": "Data Minimization",
+        "value": f"{minimization_percentage}%",
+        "status": "good" if minimization_percentage >= 85 else "warning" if minimization_percentage >= 70 else "poor"
+    })
+    
+    # Retention Compliance
+    retention_compliant = len([p for p in policies if p.get("retention_window") and "30" in p["retention_window"]])
+    retention_percentage = round((retention_compliant / total_policies * 100), 1) if total_policies > 0 else 0
+    metrics.append({
+        "metric": "Retention Compliance",
+        "value": f"{retention_percentage}%",
+        "status": "good" if retention_percentage >= 90 else "warning" if retention_percentage >= 75 else "poor"
+    })
+    
+    # User Rights Response
+    user_rights_percentage = 100.0  # Assuming all requests are handled
+    metrics.append({
+        "metric": "User Rights Response",
+        "value": f"{user_rights_percentage}%",
+        "status": "excellent"
+    })
+    
+    return metrics
+
+@router.get("/org/{org_id}/data_categories")
+async def get_organization_data_categories(org_id: str):
+    """Get data categories and usage statistics for an organization"""
+    # Get organization details to find the org name
+    from helpers import get_organization_by_id
+    org = get_organization_by_id(org_id)
+    org_name = org["org_name"] if org else org_id
+    
+    # Get all policies for this organization (by ID or name)
+    policies = list(policies_collection.find({
+        "$or": [
+            {"target_org_id": org_id},
+            {"shared_with": org_name}
+        ]
+    }))
+    
+    # Count unique users
+    unique_users = len(set([p["user_id"] for p in policies]))
+    
+    # Group by resource type
+    resource_counts = {}
+    for policy in policies:
+        resource = policy["resource_name"]
+        if resource not in resource_counts:
+            resource_counts[resource] = {"count": 0, "users": set()}
+        resource_counts[resource]["count"] += 1
+        resource_counts[resource]["users"].add(policy["user_id"])
+    
+    # Calculate categories
+    categories = []
+    for resource, data in resource_counts.items():
+        user_count = len(data["users"])
+        percentage = round((user_count / unique_users * 100), 1) if unique_users > 0 else 0
+        
+        categories.append({
+            "name": resource.title(),
+            "unique_users": user_count,
+            "percentage": percentage
+        })
+    
+    # Sort by percentage (highest first)
+    categories.sort(key=lambda x: x["percentage"], reverse=True)
+    
+    return categories
 
 
