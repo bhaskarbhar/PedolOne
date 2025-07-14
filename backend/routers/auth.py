@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Body
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timedelta
 import bcrypt
@@ -663,3 +663,18 @@ class EmailCheckRequest(BaseModel):
 def check_email(data: EmailCheckRequest):
     user = users_collection.find_one({"email": data.email})
     return {"exists": bool(user)} 
+
+class UpdateOrgIdRequest(BaseModel):
+    user_id: int
+    organization_id: str
+
+@router.post("/update-organization-id")
+async def update_organization_id(data: UpdateOrgIdRequest):
+    result = users_collection.update_one(
+        {"userid": data.user_id},
+        {"$set": {"organization_id": data.organization_id}}
+    )
+    if result.modified_count == 1:
+        return {"status": "success", "message": "Organization ID updated for user."}
+    else:
+        raise HTTPException(status_code=404, detail="User not found or organization ID not updated.") 

@@ -139,6 +139,7 @@ class LogEntry(BaseModel):
     id: Optional[ObjectId] = Field(default=None, alias="_id")
     user_id: int
     fintech_name: str
+    fintech_id: Optional[str] = None
     resource_name: str
     purpose: list[str]
     log_type: str = "consent"  # "consent" or "data_access"

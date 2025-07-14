@@ -15,6 +15,7 @@ from routers.pii_tokenizer import (
     tokenize_itform16, tokenize_upi, tokenize_passport, tokenize_dl
 )
 from models import UserInputPII
+from models import LogEntry
 
 load_dotenv()
 
@@ -101,25 +102,26 @@ def create_policy_internal(data: UserInputPII, user_id: int, ip_address: str = N
     result = policies_collection.insert_one(policy_data)
     policy_data["_id"] = str(result.inserted_id)
 
-    # Write to logs collection
-    log_entry = {
-        "user_id": user_id,
-        "fintech_name": use_contract["organization_name"],
-        "resource_name": resource,
-        "purpose": matched["purpose"] if isinstance(matched["purpose"], list) else [matched["purpose"]],
-        "log_type": "consent",
-        "ip_address": ip_address,
-        "data_source": "individual",
-        "created_at": created_at
-    }
-    
-    # Add inter-org sharing fields to log if provided
-    if source_org_id:
-        log_entry["source_org_id"] = source_org_id
+    # Write to logs collection using LogEntry model
+    log_entry = LogEntry(
+        user_id=user_id,
+        fintech_name=use_contract["organization_name"],
+        fintech_id=str(use_contract.get("organization_id") or use_contract.get("org_id") or ""),
+        resource_name=resource,
+        purpose=matched["purpose"] if isinstance(matched["purpose"], list) else [matched["purpose"]],
+        log_type="consent",
+        ip_address=ip_address,
+        data_source="individual",
+        created_at=created_at,
+        source_org_id=source_org_id,
+        target_org_id=target_org_id if target_org_id else None
+    ).dict(by_alias=True)
+    # If target_org_id is set, set data_source to organization
     if target_org_id:
-        log_entry["target_org_id"] = target_org_id
         log_entry["data_source"] = "organization"
-    
+    # Remove _id if None to avoid duplicate key error
+    if log_entry.get("_id") is None:
+        log_entry.pop("_id")
     logs_collection.insert_one(log_entry)
 
     return jsonable_encoder(policy_data)
@@ -355,4 +357,46 @@ async def get_organization_data_categories(org_id: str):
     
     return categories
 
+@router.get("/org-dashboard/{org_id}/logs")
+def get_org_access_logs(org_id: str, limit: int = 10):
+    """Get recent access logs for an organization's PII by fintech_id"""
+    logs = list(logs_collection.find(
+        {"fintech_id": org_id},
+        sort=[("created_at", -1)],
+        limit=limit
+    ))
+    # Convert ObjectId to string and format dates
+    for log in logs:
+        log["_id"] = str(log["_id"])
+        log["created_at"] = log["created_at"].isoformat()
+        # For frontend compatibility: always provide fintechName
+        log["fintechId"] = log.get("fintech_id")
+    return jsonable_encoder(logs)
 
+@router.get("/org-dashboard/{org_id}/data_categories")
+def get_org_dashboard_data_categories(org_id: str):
+    """Return data categories for an organization dashboard using contract_id."""
+    from helpers import organizations_collection
+    org = organizations_collection.find_one({"org_id": org_id})
+    if not org or not org.get("contract_id"):
+        return {"data_categories": []}
+    contract_id = org["contract_id"]
+    print(contract_id)
+    # Use the same logic as get_data_categories_for_contract
+    pipeline = [
+        {"$match": {"contract_id": contract_id}},
+        {"$group": {"_id": "$resource_name", "count": {"$sum": 1}}}
+    ]
+    resource_counts = list(policies_collection.aggregate(pipeline))
+    unique_user_ids = policies_collection.distinct("user_id", {"contract_id": contract_id})
+    total_users = len(unique_user_ids) or 1
+    categories = []
+    for rc in resource_counts:
+        percentage = round((rc["count"] / total_users) * 100, 1)
+        categories.append({
+            "name": rc["_id"],
+            "count": rc["count"],
+            "percentage": percentage,
+            "unique_users": total_users
+        })
+    return {"data_categories": categories}

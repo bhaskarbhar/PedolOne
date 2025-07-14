@@ -4,6 +4,7 @@ import {
   Building2, Users, FileText, Shield, Database, Activity, Calendar, Settings, TrendingUp, AlertTriangle, CheckCircle, Clock, Eye, Download
 } from 'lucide-react';
 import axios from 'axios';
+import AuditLogTable from '../components/AuditLogTable';
 
 // Create axios instance with auth token
 const createAxiosInstance = () => {
@@ -39,8 +40,20 @@ export default function OrgDashboard() {
   // Loading and error states
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [contractId, setContractId] = useState("");
+  const [contractError, setContractError] = useState("");
+  const [orgIdInput, setOrgIdInput] = useState("");
+  const [orgIdConfirmed, setOrgIdConfirmed] = useState(false);
+
+  // Always declare orgIdToUse before any useEffect or logic that uses it
+  const orgIdToUse = orgIdConfirmed ? orgIdInput : (orgInfo?.org_id || user?.organization_id);
 
   useEffect(() => {
+    // If user is org admin but has no org_id, skip auto-fetch
+    if (!user || (user.user_type === 'organization' && !user.organization_id && !orgInfo)) {
+      setLoading(false);
+      return;
+    }
     if (!user || !user.organization_id) {
       setError("User not associated with any organization");
       setLoading(false);
@@ -50,7 +63,7 @@ export default function OrgDashboard() {
     const fetchOrgData = async () => {
       try {
         setError(null);
-        const orgId = user.organization_id;
+        const orgId = orgIdToUse;
         const api = createAxiosInstance();
         
         console.log('Fetching data for organization:', orgId);
@@ -72,13 +85,24 @@ export default function OrgDashboard() {
         setContracts(contractsResponse.data || []);
         
         // Fetch audit logs
-        const logsResponse = await api.get(`/audit/org/${orgId}`);
-        console.log('Audit logs response:', logsResponse.data);
-        setAuditLogs(logsResponse.data || []);
+        const logsResponse = await api.get(`/policy/org-dashboard/${orgIdToUse}/logs`);
+        const logsArr = Array.isArray(logsResponse.data) ? logsResponse.data : [];
+        const logs = logsArr.map(log => ({
+          id: log._id || log.log_id,
+          date: new Date(log.created_at).toLocaleString(),
+          type: log.log_type || 'consent',
+          dataSource: log.data_source || 'individual',
+          fintechName: log.fintechName || log.fintech_name || 'Unknown',
+          fintechId: log.fintechId || log.fintech_id || '',
+          dataAccessed: log.resource_name?.charAt(0).toUpperCase() + log.resource_name?.slice(1),
+          purpose: Array.isArray(log.purpose) ? log.purpose.join(', ') : log.purpose,
+          ipAddress: log.ip_address || 'N/A'
+        }));
+        setAuditLogs(logs);
         
         // Fetch data categories
-        const categoriesResponse = await api.get(`/policy/org/${orgId}/data_categories`);
-        setDataCategories(categoriesResponse.data || []);
+        const categoriesResponse = await api.get(`/policy/org-dashboard/${orgIdToUse}/data_categories`);
+        setDataCategories(categoriesResponse.data.data_categories || []);
         
         // Fetch compliance metrics
         const complianceResponse = await api.get(`/policy/compliance/org/${orgId}`);
@@ -93,7 +117,92 @@ export default function OrgDashboard() {
     };
 
     fetchOrgData();
-  }, [user]);
+  }, [orgIdToUse]);
+
+  // Handler for contract_id input
+  const handleContractIdSubmit = async (e) => {
+    e.preventDefault();
+    setContractError("");
+    setLoading(true);
+    try {
+      const api = createAxiosInstance();
+      const res = await api.get(`/organization/list`);
+      const orgs = res.data.organizations || [];
+      const found = orgs.find(o => o.contract_id === contractId);
+      if (found) {
+        setOrgInfo(found);
+        setContractError("");
+      } else {
+        setContractError("No organization found with this contract ID.");
+      }
+    } catch (err) {
+      setContractError("Error fetching organization by contract ID.");
+    }
+    setLoading(false);
+  };
+
+  // Handler for organization_id input
+  const handleOrgIdSubmit = async (e) => {
+    e.preventDefault();
+    if (orgIdInput.trim() === orgInfo?.org_id) {
+      // Update user's organization_id in the backend
+      try {
+        const api = createAxiosInstance();
+        await api.post(`/auth/update-organization-id`, {
+          user_id: user.userid,
+          organization_id: orgIdInput.trim()
+        });
+        setOrgIdConfirmed(true);
+        setContractError("");
+      } catch (err) {
+        setContractError("Failed to update organization ID in user profile.");
+      }
+    } else {
+      setContractError("Organization ID does not match the contract. Please try again.");
+    }
+  };
+
+  // If org admin and no org_id and no orgInfo, show contract_id input
+  if (user && user.user_type === 'organization' && !user.organization_id && !orgInfo) {
+    return (
+      <div style={{ minHeight: '100vh', backgroundColor: '#f9fafb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <form onSubmit={handleContractIdSubmit} style={{ background: 'white', padding: '2rem', borderRadius: '8px', boxShadow: '0 2px 8px #0001', minWidth: 320 }}>
+          <h2 style={{ marginBottom: '1rem', color: '#111827' }}>Enter Contract ID</h2>
+          <input
+            type="text"
+            value={contractId}
+            onChange={e => setContractId(e.target.value)}
+            placeholder="Enter contract ID"
+            style={{ width: '100%', padding: '0.75rem', border: '1px solid #e5e7eb', borderRadius: '4px', marginBottom: '1rem' }}
+            required
+          />
+          <button type="submit" style={{ width: '100%', padding: '0.75rem', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 500 }}>Submit</button>
+          {contractError && <div style={{ color: '#dc2626', marginTop: '1rem' }}>{contractError}</div>}
+        </form>
+      </div>
+    );
+  }
+
+  // If contract found but org_id not confirmed, prompt for org_id
+  if (user && user.user_type === 'organization' && !user.organization_id && orgInfo && !orgIdConfirmed) {
+    return (
+      <div style={{ minHeight: '100vh', backgroundColor: '#f9fafb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <form onSubmit={handleOrgIdSubmit} style={{ background: 'white', padding: '2rem', borderRadius: '8px', boxShadow: '0 2px 8px #0001', minWidth: 320 }}>
+          <h2 style={{ marginBottom: '1rem', color: '#111827' }}>Enter Organization ID</h2>
+          <input
+            type="text"
+            value={orgIdInput}
+            onChange={e => setOrgIdInput(e.target.value)}
+            placeholder="Enter organization ID"
+            style={{ width: '100%', padding: '0.75rem', border: '1px solid #e5e7eb', borderRadius: '4px', marginBottom: '1rem' }}
+            required
+          />
+          <button type="submit" style={{ width: '100%', padding: '0.75rem', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 500 }}>Submit</button>
+          {contractError && <div style={{ color: '#dc2626', marginTop: '1rem' }}>{contractError}</div>}
+        </form>
+      </div>
+    );
+  }
 
   // Add handlers for approve/reject
   const handleApproveRequest = async (requestId) => {
@@ -128,14 +237,13 @@ export default function OrgDashboard() {
     }
   };
 
+  // Remove Contracts and Compliance from the tabs array
   const tabs = [
     { id: 'overview', label: 'Overview', icon: <Activity size={16} /> },
     { id: 'users', label: 'User Management', icon: <Users size={16} /> },
     { id: 'data_requests', label: 'Data Requests', icon: <FileText size={16} /> },
-    { id: 'contracts', label: 'Contracts', icon: <Shield size={16} /> },
     { id: 'audit_logs', label: 'Audit Logs', icon: <Database size={16} /> },
     { id: 'data_categories', label: 'Data Categories', icon: <Database size={16} /> },
-    { id: 'compliance', label: 'Compliance', icon: <TrendingUp size={16} /> },
   ];
 
   if (loading) {
@@ -236,34 +344,7 @@ export default function OrgDashboard() {
                 {auditLogs.length === 0 ? (
                   <div style={{ color: '#d97706' }}>No recent audit logs.</div>
                 ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ background: '#f3f4f6' }}>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>User ID</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Fintech Name</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Resource</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Purpose</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Type</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>IP Address</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Data Source</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Created At</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Array.isArray(auditLogs) ? auditLogs.slice(0, 10).map((log, idx) => (
-                        <tr key={idx}>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{log.user_id}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{log.fintech_name}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{log.resource_name}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{Array.isArray(log.purpose) ? log.purpose.join(', ') : log.purpose}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{log.log_type}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{log.ip_address}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{log.data_source}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{log.created_at}</td>
-                        </tr>
-                      )) : null}
-                    </tbody>
-                  </table>
+                  <AuditLogTable logs={auditLogs} />
                 )}
               </div>
             </div>
@@ -367,62 +448,6 @@ export default function OrgDashboard() {
                         </div>
                       </div>
           )}
-          {activeTab === 'contracts' && (
-            <div>
-              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1.5rem' }}>Inter-Organization Contracts</h2>
-              <div style={{ background: 'white', borderRadius: '12px', padding: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
-                {!Array.isArray(contracts) || contracts.length === 0 ? (
-                  <div style={{ color: '#d97706' }}>No inter-organization contracts found for this organization.</div>
-                ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ background: '#f3f4f6' }}>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Contract ID</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Source Org</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Target Org</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Type</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Resources</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Purposes</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Retention</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Data Flow</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Status</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Created At</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Expires At</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {contracts.map((contract, idx) => (
-                        <tr key={idx}>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{contract.contract_id}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{contract.source_org_name}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{contract.target_org_name}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{contract.contract_type}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{Array.isArray(contract.allowed_resources) ? contract.allowed_resources.join(', ') : contract.allowed_resources}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{Array.isArray(contract.purposes) ? contract.purposes.join(', ') : contract.purposes}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{contract.retention_window}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{contract.data_flow_direction}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>
-                      <span style={{
-                              padding: '0.25rem 0.5rem',
-                        borderRadius: '4px',
-                        fontSize: '0.75rem',
-                        fontWeight: '500',
-                              backgroundColor: contract.status === 'active' ? '#ecfdf5' : contract.status === 'expired' ? '#fef3c7' : '#fee2e2',
-                              color: contract.status === 'active' ? '#059669' : contract.status === 'expired' ? '#d97706' : '#dc2626'
-                      }}>
-                              {contract.status}
-                      </span>
-                          </td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{contract.created_at}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{contract.expires_at}</td>
-                        </tr>
-                  ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-              </div>
-            )}
           {activeTab === 'audit_logs' && (
               <div>
               <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1.5rem' }}>Audit Logs</h2>
@@ -430,88 +455,7 @@ export default function OrgDashboard() {
                 {!Array.isArray(auditLogs) || auditLogs.length === 0 ? (
                   <div style={{ color: '#d97706' }}>No audit logs found for this organization.</div>
                 ) : (
-                  <>
-                    <div style={{ marginBottom: '1rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                      <input
-                        type="text"
-                        placeholder="Search by user ID, fintech name, or resource..."
-                        style={{ padding: '0.5rem', border: '1px solid #e5e7eb', borderRadius: '4px', flex: 1 }}
-                        onChange={(e) => {
-                          const searchTerm = e.target.value.toLowerCase();
-                          if (!Array.isArray(auditLogs)) return;
-                          const filtered = auditLogs.filter(log => 
-                            log.user_id.toString().includes(searchTerm) ||
-                            log.fintech_name.toLowerCase().includes(searchTerm) ||
-                            log.resource_name.toLowerCase().includes(searchTerm)
-                          );
-                          setAuditLogs(filtered);
-                        }}
-                      />
-                      <select
-                        style={{ padding: '0.5rem', border: '1px solid #e5e7eb', borderRadius: '4px' }}
-                        onChange={(e) => {
-                          const filterType = e.target.value;
-                          if (filterType === 'all') {
-                            // Reset to original data
-                            axios.get(`/audit/org/${user?.organization_id}`)
-                              .then(res => setAuditLogs(res.data || []))
-                              .catch(() => setAuditLogs([]));
-                          } else {
-                            if (!Array.isArray(auditLogs)) return;
-                            const filtered = auditLogs.filter(log => log.log_type === filterType);
-                            setAuditLogs(filtered);
-                          }
-                        }}
-                      >
-                        <option value="all">All Types</option>
-                        <option value="consent">Consent</option>
-                        <option value="data_access">Data Access</option>
-                      </select>
-                    </div>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr style={{ background: '#f3f4f6' }}>
-                          <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>User ID</th>
-                          <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Fintech Name</th>
-                          <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Resource</th>
-                          <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Purpose</th>
-                          <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Type</th>
-                          <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>IP Address</th>
-                          <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Data Source</th>
-                          <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Source Org</th>
-                          <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Target Org</th>
-                          <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Created At</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {auditLogs.map((log, idx) => (
-                          <tr key={idx}>
-                            <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{log.user_id}</td>
-                            <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{log.fintech_name}</td>
-                            <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{log.resource_name}</td>
-                            <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{Array.isArray(log.purpose) ? log.purpose.join(', ') : log.purpose}</td>
-                            <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>
-                              <span style={{
-                                padding: '0.25rem 0.5rem',
-                                borderRadius: '4px',
-                                fontSize: '0.75rem',
-                                fontWeight: '500',
-                                backgroundColor: log.log_type === 'consent' ? '#ecfdf5' : '#eff6ff',
-                                color: log.log_type === 'consent' ? '#059669' : '#2563eb'
-                              }}>
-                                {log.log_type}
-                              </span>
-                            </td>
-                            <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{log.ip_address || 'N/A'}</td>
-                            <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{log.data_source}</td>
-                            <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{log.source_org_id || 'N/A'}</td>
-                            <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{log.target_org_id || 'N/A'}</td>
-                            <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{log.created_at}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </>
+                  <AuditLogTable logs={auditLogs} />
                 )}
               </div>
               </div>
@@ -563,48 +507,6 @@ export default function OrgDashboard() {
                   </div>
                 )}
                 </div>
-              </div>
-            )}
-          {activeTab === 'compliance' && (
-              <div>
-              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1.5rem' }}>Compliance Metrics</h2>
-              <div style={{ background: 'white', borderRadius: '12px', padding: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
-                {!Array.isArray(complianceMetrics) || complianceMetrics.length === 0 ? (
-                  <div style={{ color: '#d97706' }}>No compliance metrics available for this organization.</div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    {complianceMetrics.map((metric, index) => (
-                      <div key={index} style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '1rem',
-                        backgroundColor: '#f9fafb',
-                        borderRadius: '8px',
-                        border: '1px solid #e5e7eb'
-                      }}>
-                        <span style={{ fontWeight: '500', color: '#111827' }}>
-                          {metric.metric}
-                        </span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <span style={{
-                            fontWeight: '600',
-                            color: metric.status === 'good' ? '#059669' : metric.status === 'warning' ? '#d97706' : metric.status === 'excellent' ? '#059669' : '#6b7280'
-                          }}>
-                            {metric.value}
-                          </span>
-                          <div style={{
-                            width: '8px',
-                            height: '8px',
-                            borderRadius: '50%',
-                            backgroundColor: metric.status === 'good' ? '#059669' : metric.status === 'warning' ? '#d97706' : metric.status === 'excellent' ? '#059669' : '#6b7280'
-                          }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
               </div>
             )}
         </div>

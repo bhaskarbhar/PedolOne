@@ -11,7 +11,7 @@ import AuditLogTable from '../components/AuditLogTable';
 import axios from 'axios';
 
 const UserDashboard = () => {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
   const [maskedData, setMaskedData] = useState([]);
   const [activeConsents, setActiveConsents] = useState([]);
@@ -103,6 +103,11 @@ const UserDashboard = () => {
     }
   };
 
+  // Helper function to get axios config with Authorization header
+  const getAuthConfig = () => ({
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
   const fetchUserData = useCallback(async () => {
     if (!user?.userid) return;
     
@@ -110,7 +115,7 @@ const UserDashboard = () => {
       setError(null);
 
       // Fetch user's PII data
-      const piiResponse = await axios.get(`/auth/user-pii/${user.userid}`);
+      const piiResponse = await axios.get(`/auth/user-pii/${user.userid}`, getAuthConfig());
       const piiArr = Array.isArray(piiResponse.data?.pii) ? piiResponse.data.pii : [];
       const piiData = piiArr.map(item => ({
         label: item.resource.charAt(0).toUpperCase() + item.resource.slice(1),
@@ -119,7 +124,7 @@ const UserDashboard = () => {
       setMaskedData(piiData);
 
       // Fetch active policies
-      const policiesResponse = await axios.get(`/policy/user/${user.userid}/active`);
+      const policiesResponse = await axios.get(`/policy/user/${user.userid}/active`, getAuthConfig());
       const policiesArr = Array.isArray(policiesResponse.data) ? policiesResponse.data : [];
       const consents = policiesArr.map(policy => ({
         id: policy.policy_id,
@@ -132,9 +137,13 @@ const UserDashboard = () => {
       setActiveConsents(consents);
 
       // Fetch access logs
-      const logsResponse = await axios.get(`/policy/user/${user.userid}/logs`);
+      const logsResponse = await axios.get(`/policy/user/${user.userid}/logs`, getAuthConfig());
       const logsArr = Array.isArray(logsResponse.data) ? logsResponse.data : [];
-      const logs = logsArr.map(log => ({
+      let filteredLogs = logsArr;
+      if (user?.user_type === 'organization' && user.organization_id) {
+        filteredLogs = logsArr.filter(log => log.fintech_id === user.organization_id);
+      }
+      const logs = filteredLogs.map(log => ({
         id: log._id || log.log_id,
         date: new Date(log.created_at).toLocaleString(),
         type: log.log_type || 'consent',
@@ -148,13 +157,13 @@ const UserDashboard = () => {
 
       // Fetch data requests (if user is individual)
       if (user.user_type === 'individual') {
-        const requestsResponse = await axios.get(`/data-requests/received/${user.userid}`);
+        const requestsResponse = await axios.get(`/data-requests/received/${user.userid}`, getAuthConfig());
         setDataRequests(requestsResponse.data || []);
       }
 
       // Fetch organization users (if user is organization admin)
       if (user.user_type === 'organization') {
-        const orgUsersResponse = await axios.get(`/organization/${user.organization_id}/clients`);
+        const orgUsersResponse = await axios.get(`/organization/${user.organization_id}/clients`, getAuthConfig());
         setOrgUsers(orgUsersResponse.data || []);
       }
 
@@ -163,13 +172,13 @@ const UserDashboard = () => {
       setError('Failed to load user data. Please try again later.');
       setLoading(false);
     }
-  }, [user]);
+  }, [user, token]);
 
   // Initialize WebSocket connection
   useEffect(() => {
-    if (!user?.userid) return;
+    if (!user?.userid || !token) return;
 
-    const ws = new WebSocket(`ws://localhost:8000/ws/user/${user.userid}`);
+    const ws = new WebSocket(`ws://localhost:8000/ws/user/${user.userid}?token=${token}`);
 
     ws.onopen = () => {
       console.log('WebSocket connected');
@@ -245,7 +254,7 @@ const UserDashboard = () => {
         ws.close();
       }
     };
-  }, [user, fetchUserData]);
+  }, [user, token, fetchUserData]);
 
   // Initial data fetch
   useEffect(() => {
@@ -263,7 +272,8 @@ const UserDashboard = () => {
           user_id: user.userid,
           resource: addPIIType,
           pii_value: addPIIValue
-        }
+        },
+        headers: { Authorization: `Bearer ${token}` }
       });
       if (res.data && res.data.status === 'success') {
         setAddPIISuccess('PII added successfully!');
@@ -282,7 +292,7 @@ const UserDashboard = () => {
   const handleSendDataRequest = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post('/data-requests/send-request', sendRequestData);
+      const res = await axios.post('/data-requests/send-request', sendRequestData, getAuthConfig());
       setShowSendRequestModal(false);
       setSendRequestData({
         target_user_email: '',
@@ -293,7 +303,7 @@ const UserDashboard = () => {
       });
       // Refresh data requests
       if (user.user_type === 'organization') {
-        const requestsResponse = await axios.get(`/data-requests/sent/${user.organization_id}`);
+        const requestsResponse = await axios.get(`/data-requests/sent/${user.organization_id}`, getAuthConfig());
         setDataRequests(requestsResponse.data || []);
       }
     } catch (err) {
@@ -307,7 +317,7 @@ const UserDashboard = () => {
         request_id: requestId,
         status: status,
         response_message: message
-      });
+      }, getAuthConfig());
       fetchUserData(); // Refresh data
     } catch (err) {
       console.error('Error responding to request:', err);
@@ -316,7 +326,7 @@ const UserDashboard = () => {
 
   const handleUserClick = async (userId) => {
     try {
-      const response = await axios.get(`/organization/${user.organization_id}/clients/${userId}/pii`);
+      const response = await axios.get(`/organization/${user.organization_id}/clients/${userId}/pii`, getAuthConfig());
       setSelectedUser({
         user_id: userId,
         ...response.data
