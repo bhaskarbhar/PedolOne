@@ -167,6 +167,8 @@ class DataAccessRequest(BaseModel):
     requester_org_name: str
     target_user_id: int
     target_user_email: str
+    target_org_id: Optional[str] = None
+    target_org_name: Optional[str] = None
     requested_resources: List[str]  # List of PII types requested
     purpose: List[str]
     retention_window: str

@@ -362,4 +362,53 @@ async def get_organization_users(org_id: str):
                 "total_data_access_count": data_access_count
             })
     
-    return users 
+    return users
+
+@router.get("/list/organizations")
+async def get_all_organizations():
+    """Get all organizations in the system (for data request targeting)"""
+    organizations = []
+    for org in organizations_collection.find():
+        organizations.append({
+            "org_id": org["org_id"],
+            "org_name": org["org_name"],
+            "contract_id": org["contract_id"]
+        })
+    
+    return {"organizations": organizations}
+
+@router.get("/{org_id}/all-users")
+async def get_all_users_by_organization(org_id: str):
+    """Get all users that have shared data with a specific organization"""
+    # Get organization details
+    org = get_organization_by_id(org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    
+    org_name = org["org_name"]
+    
+    # Get users who have policies with this organization (by ID or name)
+    user_policies = list(policies_collection.find({
+        "$or": [
+            {"target_org_id": org_id},
+            {"shared_with": org_name}
+        ]
+    }))
+    
+    # Get unique user IDs
+    user_ids = list(set([policy["user_id"] for policy in user_policies]))
+    
+    # Get user details
+    users = []
+    for user_id in user_ids:
+        user = users_collection.find_one({"userid": user_id})
+        if user:
+            users.append({
+                "user_id": user["userid"],
+                "username": user["username"],
+                "full_name": user["full_name"],
+                "email": user["email"],
+                "phone_number": user["phone_number"]
+            })
+    
+    return {"users": users} 

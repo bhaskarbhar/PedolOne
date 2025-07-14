@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  Building2, Users, FileText, Shield, Database, Activity, Calendar, Settings, TrendingUp, AlertTriangle, CheckCircle, Clock, Eye, Download
+  Building2, Users, FileText, Shield, Database, Activity, Calendar, Settings, TrendingUp, AlertTriangle, CheckCircle, Clock, Eye, Download, Plus, X
 } from 'lucide-react';
 import axios from 'axios';
 import AuditLogTable from '../components/AuditLogTable';
@@ -44,6 +44,25 @@ export default function OrgDashboard() {
   const [contractError, setContractError] = useState("");
   const [orgIdInput, setOrgIdInput] = useState("");
   const [orgIdConfirmed, setOrgIdConfirmed] = useState(false);
+
+  // New state for create data request modal
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createRequestLoading, setCreateRequestLoading] = useState(false);
+  const [createRequestError, setCreateRequestError] = useState("");
+  const [availableOrganizations, setAvailableOrganizations] = useState([]);
+  const [availableUsers, setAvailableUsers] = useState([]);
+  const [availableResources, setAvailableResources] = useState([]);
+  const [selectedOrgId, setSelectedOrgId] = useState("");
+  
+  // Form data for create request
+  const [requestForm, setRequestForm] = useState({
+    target_org_id: "",
+    target_user_email: "",
+    requested_resources: [],
+    purpose: [],
+    retention_window: "30 days",
+    request_message: ""
+  });
 
   // Always declare orgIdToUse before any useEffect or logic that uses it
   const orgIdToUse = orgIdConfirmed ? orgIdInput : (orgInfo?.org_id || user?.organization_id);
@@ -207,6 +226,7 @@ export default function OrgDashboard() {
   // Add handlers for approve/reject
   const handleApproveRequest = async (requestId) => {
     const response_message = prompt('Optional: Add a response message for approval');
+    
     try {
       const api = createAxiosInstance();
       await api.post('/data-requests/respond', {
@@ -217,12 +237,14 @@ export default function OrgDashboard() {
       // Refresh data
       window.location.reload();
     } catch (err) {
-      alert('Failed to approve request.');
+      console.error('Error approving request:', err);
+      alert('Failed to approve request: ' + (err.response?.data?.detail || err.message));
     }
   };
 
   const handleRejectRequest = async (requestId) => {
     const response_message = prompt('Optional: Add a response message for rejection');
+    
     try {
       const api = createAxiosInstance();
       await api.post('/data-requests/respond', {
@@ -233,7 +255,152 @@ export default function OrgDashboard() {
       // Refresh data
       window.location.reload();
     } catch (err) {
-      alert('Failed to reject request.');
+      console.error('Error rejecting request:', err);
+      alert('Failed to reject request: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+
+
+  // Fetch available organizations and resources for data requests
+  const fetchAvailableOrganizations = async () => {
+    try {
+      const api = createAxiosInstance();
+      const response = await api.get('/organization/list/organizations');
+      const allOrgs = response.data.organizations || [];
+      // Filter out the current organization
+      const filteredOrgs = allOrgs.filter(org => org.org_id !== orgIdToUse);
+      setAvailableOrganizations(filteredOrgs);
+    } catch (err) {
+      console.error('Error fetching available organizations:', err);
+    }
+  };
+
+  const fetchUsersByOrganization = async (orgId) => {
+    try {
+      const api = createAxiosInstance();
+      const response = await api.get(`/organization/${orgId}/all-users`);
+      const users = response.data.users || [];
+      setAvailableUsers(users);
+    } catch (err) {
+      console.error('Error fetching users for organization:', err);
+      setAvailableUsers([]);
+    }
+  };
+
+  const fetchAvailableResources = async () => {
+    try {
+      const api = createAxiosInstance();
+      const response = await api.get('/policy/org-dashboard/' + orgIdToUse + '/data_categories');
+      const categories = response.data.data_categories || [];
+      const resources = categories.map(cat => cat.name);
+      // Add common PII types as fallback
+      const commonResources = ['email', 'phone', 'address', 'ssn', 'bank_account', 'credit_card', 'aadhaar', 'pan'];
+      const allResources = [...new Set([...resources, ...commonResources])];
+      setAvailableResources(allResources);
+    } catch (err) {
+      console.error('Error fetching available resources:', err);
+      // Fallback to common PII types
+      setAvailableResources(['email', 'phone', 'address', 'ssn', 'bank_account', 'credit_card', 'aadhaar', 'pan']);
+    }
+  };
+
+  // Handle create data request modal
+  const handleOpenCreateModal = async () => {
+    setShowCreateModal(true);
+    setCreateRequestError("");
+    setSelectedOrgId("");
+    setRequestForm({
+      target_org_id: "",
+      target_user_email: "",
+      requested_resources: [],
+      purpose: [],
+      retention_window: "30 days",
+      request_message: ""
+    });
+    await fetchAvailableOrganizations();
+    await fetchAvailableResources();
+  };
+
+  const handleCloseCreateModal = () => {
+    setShowCreateModal(false);
+    setCreateRequestError("");
+  };
+
+  const handleCreateRequest = async (e) => {
+    e.preventDefault();
+    setCreateRequestLoading(true);
+    setCreateRequestError("");
+
+    // Validate form data
+    if (!requestForm.target_user_email) {
+      setCreateRequestError("Please select a target user");
+      setCreateRequestLoading(false);
+      return;
+    }
+    if (requestForm.requested_resources.length === 0) {
+      setCreateRequestError("Please select at least one resource");
+      setCreateRequestLoading(false);
+      return;
+    }
+    if (requestForm.purpose.length === 0) {
+      setCreateRequestError("Please select at least one purpose");
+      setCreateRequestLoading(false);
+      return;
+    }
+
+    try {
+      const api = createAxiosInstance();
+      await api.post('/data-requests/send-request', requestForm);
+      
+      // Close modal and refresh data
+      setShowCreateModal(false);
+      window.location.reload();
+    } catch (err) {
+      console.error('Error creating data request:', err);
+      setCreateRequestError(err.response?.data?.detail || 'Failed to create data request');
+    } finally {
+      setCreateRequestLoading(false);
+    }
+  };
+
+  const handleFormChange = (field, value) => {
+    setRequestForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleResourceToggle = (resource) => {
+    setRequestForm(prev => ({
+      ...prev,
+      requested_resources: prev.requested_resources.includes(resource)
+        ? prev.requested_resources.filter(r => r !== resource)
+        : [...prev.requested_resources, resource]
+    }));
+  };
+
+  const handlePurposeToggle = (purpose) => {
+    setRequestForm(prev => ({
+      ...prev,
+      purpose: prev.purpose.includes(purpose)
+        ? prev.purpose.filter(p => p !== purpose)
+        : [...prev.purpose, purpose]
+    }));
+  };
+
+  const handleOrganizationChange = async (orgId) => {
+    setSelectedOrgId(orgId);
+    setRequestForm(prev => ({
+      ...prev,
+      target_org_id: orgId,
+      target_user_email: "" // Reset user selection when org changes
+    }));
+    
+    if (orgId) {
+      await fetchUsersByOrganization(orgId);
+    } else {
+      setAvailableUsers([]);
     }
   };
 
@@ -392,52 +559,180 @@ export default function OrgDashboard() {
           )}
           {activeTab === 'data_requests' && (
                         <div>
-              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1.5rem' }}>Data Access Requests</h2>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>Data Access Requests</h2>
+                <button
+                  onClick={handleOpenCreateModal}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    background: '#2563eb',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '0.75rem 1rem',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  <Plus size={16} />
+                  Create Request
+                </button>
+              </div>
+              
               <div style={{ background: 'white', borderRadius: '12px', padding: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
                 {!Array.isArray(dataRequests) || dataRequests.length === 0 ? (
-                  <div style={{ color: '#d97706' }}>No data access requests found for this organization.</div>
+                  <div style={{ color: '#d97706', textAlign: 'center', padding: '2rem' }}>
+                    <FileText size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                    <div>No data access requests found for this organization.</div>
+                    <div style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
+                      Click "Create Request" to send a new data access request to a user.
+                    </div>
+                  </div>
                 ) : (
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ background: '#f3f4f6' }}>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Request ID</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Requester Org</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Target User</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Resources</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Purpose</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Retention</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Status</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Created At</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Expires At</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Actions</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Type</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Request ID</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Organization</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Target User</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Resources</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Purpose</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Retention</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Status</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Created</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Expires</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {dataRequests.map((req, idx) => (
-                        <tr key={idx}>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{req.request_id}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{req.requester_org_name}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{req.target_user_email}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{Array.isArray(req.requested_resources) ? req.requested_resources.join(', ') : req.requested_resources}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{Array.isArray(req.purpose) ? req.purpose.join(', ') : req.purpose}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{req.retention_window}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{req.status}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{req.created_at}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{req.expires_at}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>
-                            {req.status === 'pending' ? (
-                              <>
-                                <button style={{ marginRight: 8, background: '#059669', color: 'white', border: 'none', borderRadius: 4, padding: '0.25rem 0.75rem', cursor: 'pointer' }}
-                                  onClick={() => handleApproveRequest(req.request_id)}>
+                        <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                            <span style={{
+                              padding: '0.25rem 0.75rem',
+                              borderRadius: '12px',
+                              fontSize: '0.75rem',
+                              fontWeight: '500',
+                              background: req.is_requester ? '#dbeafe' : '#fef3c7',
+                              color: req.is_requester ? '#1e40af' : '#d97706'
+                            }}>
+                              {req.is_requester ? 'Sent' : 'Received'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                            <code style={{ background: '#f3f4f6', padding: '0.25rem 0.5rem', borderRadius: '4px' }}>
+                              {req.request_id?.substring(0, 8)}...
+                            </code>
+                          </td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                            {req.is_requester ? req.target_org_name : req.requester_org_name}
+                          </td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>{req.target_user_email}</td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                              {Array.isArray(req.requested_resources) ? req.requested_resources.map((resource, i) => (
+                                <span key={i} style={{
+                                  background: '#dbeafe',
+                                  color: '#1e40af',
+                                  padding: '0.25rem 0.5rem',
+                                  borderRadius: '12px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '500'
+                                }}>
+                                  {resource}
+                                </span>
+                              )) : (
+                                <span style={{
+                                  background: '#dbeafe',
+                                  color: '#1e40af',
+                                  padding: '0.25rem 0.5rem',
+                                  borderRadius: '12px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '500'
+                                }}>
+                                  {req.requested_resources}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>
+                            {Array.isArray(req.purpose) ? req.purpose.join(', ') : req.purpose}
+                          </td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>{req.retention_window}</td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>
+                            <span style={{
+                              padding: '0.25rem 0.75rem',
+                              borderRadius: '12px',
+                              fontSize: '0.75rem',
+                              fontWeight: '500',
+                              background: req.status === 'approved' ? '#dcfce7' : 
+                                         req.status === 'rejected' ? '#fee2e2' : 
+                                         req.status === 'expired' ? '#fef3c7' : '#dbeafe',
+                              color: req.status === 'approved' ? '#166534' : 
+                                     req.status === 'rejected' ? '#dc2626' : 
+                                     req.status === 'expired' ? '#d97706' : '#1e40af'
+                            }}>
+                              {req.status}
+                            </span>
+                          </td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                            {new Date(req.created_at).toLocaleDateString()}
+                          </td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                            {new Date(req.expires_at).toLocaleDateString()}
+                          </td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>
+                            {req.status === 'pending' && !req.is_requester ? (
+                              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <button 
+                                  style={{ 
+                                    background: '#059669', 
+                                    color: 'white', 
+                                    border: 'none', 
+                                    borderRadius: '6px', 
+                                    padding: '0.5rem 0.75rem', 
+                                    cursor: 'pointer',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '500'
+                                  }}
+                                  onClick={() => handleApproveRequest(req.request_id)}
+                                >
                                   Approve
                                 </button>
-                                <button style={{ background: '#dc2626', color: 'white', border: 'none', borderRadius: 4, padding: '0.25rem 0.75rem', cursor: 'pointer' }}
-                                  onClick={() => handleRejectRequest(req.request_id)}>
+                                <button 
+                                  style={{ 
+                                    background: '#dc2626', 
+                                    color: 'white', 
+                                    border: 'none', 
+                                    borderRadius: '6px', 
+                                    padding: '0.5rem 0.75rem', 
+                                    cursor: 'pointer',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '500'
+                                  }}
+                                  onClick={() => handleRejectRequest(req.request_id)}
+                                >
                                   Reject
                                 </button>
-                              </>
+                              </div>
                             ) : (
-                              <span style={{ color: req.status === 'approved' ? '#059669' : req.status === 'rejected' ? '#dc2626' : '#6b7280' }}>{req.status}</span>
+                              <span style={{ 
+                                color: req.status === 'approved' ? '#059669' : 
+                                       req.status === 'rejected' ? '#dc2626' : '#6b7280',
+                                fontSize: '0.875rem'
+                              }}>
+                                {req.is_requester ? (
+                                  <span style={{ fontStyle: 'italic', color: '#6b7280' }}>
+                                    {req.status === 'pending' ? 'Waiting for response...' : req.status}
+                                  </span>
+                                ) : (
+                                  req.status
+                                )}
+                              </span>
                             )}
                           </td>
                         </tr>
@@ -511,6 +806,287 @@ export default function OrgDashboard() {
             )}
         </div>
       </div>
+
+      {/* Create Data Request Modal */}
+      {showCreateModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '2rem',
+            maxWidth: '600px',
+            width: '90%',
+            maxHeight: '90vh',
+            overflow: 'auto'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '1.5rem'
+            }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>Create Data Access Request</h2>
+              <button
+                onClick={handleCloseCreateModal}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '0.5rem',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {createRequestError && (
+              <div style={{
+                background: '#fee2e2',
+                color: '#dc2626',
+                padding: '0.75rem',
+                borderRadius: '8px',
+                marginBottom: '1rem',
+                fontSize: '0.875rem'
+              }}>
+                {createRequestError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateRequest}>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Target Organization *
+                </label>
+                <select
+                  value={selectedOrgId}
+                  onChange={(e) => handleOrganizationChange(e.target.value)}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  <option value="">Select an organization...</option>
+                  {availableOrganizations.map((org) => (
+                    <option key={org.org_id} value={org.org_id}>
+                      {org.org_name} ({org.org_id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Target User *
+                </label>
+                <select
+                  value={requestForm.target_user_email}
+                  onChange={(e) => handleFormChange('target_user_email', e.target.value)}
+                  required
+                  disabled={!selectedOrgId}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    backgroundColor: !selectedOrgId ? '#f9fafb' : 'white'
+                  }}
+                >
+                  <option value="">
+                    {!selectedOrgId ? 'Please select an organization first...' : 'Select a user...'}
+                  </option>
+                  {availableUsers.map((user) => (
+                    <option key={user.user_id} value={user.email}>
+                      {user.full_name} ({user.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Requested Resources *
+                </label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  {availableResources.map((resource) => (
+                    <button
+                      key={resource}
+                      type="button"
+                      onClick={() => handleResourceToggle(resource)}
+                      style={{
+                        padding: '0.5rem 1rem',
+                        border: requestForm.requested_resources.includes(resource) 
+                          ? '2px solid #2563eb' 
+                          : '2px solid #e5e7eb',
+                        borderRadius: '20px',
+                        background: requestForm.requested_resources.includes(resource) 
+                          ? '#dbeafe' 
+                          : 'white',
+                        color: requestForm.requested_resources.includes(resource) 
+                          ? '#1e40af' 
+                          : '#374151',
+                        cursor: 'pointer',
+                        fontSize: '0.875rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      {resource}
+                    </button>
+                  ))}
+                </div>
+                {requestForm.requested_resources.length === 0 && (
+                  <div style={{ color: '#dc2626', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+                    Please select at least one resource
+                  </div>
+                )}
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Purpose *
+                </label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  {['KYC', 'Credit Assessment', 'Fraud Prevention', 'Compliance', 'Service Provision', 'Analytics'].map((purpose) => (
+                    <button
+                      key={purpose}
+                      type="button"
+                      onClick={() => handlePurposeToggle(purpose)}
+                      style={{
+                        padding: '0.5rem 1rem',
+                        border: requestForm.purpose.includes(purpose) 
+                          ? '2px solid #2563eb' 
+                          : '2px solid #e5e7eb',
+                        borderRadius: '20px',
+                        background: requestForm.purpose.includes(purpose) 
+                          ? '#dbeafe' 
+                          : 'white',
+                        color: requestForm.purpose.includes(purpose) 
+                          ? '#1e40af' 
+                          : '#374151',
+                        cursor: 'pointer',
+                        fontSize: '0.875rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      {purpose}
+                    </button>
+                  ))}
+                </div>
+                {requestForm.purpose.length === 0 && (
+                  <div style={{ color: '#dc2626', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+                    Please select at least one purpose
+                  </div>
+                )}
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Retention Window
+                </label>
+                <select
+                  value={requestForm.retention_window}
+                  onChange={(e) => handleFormChange('retention_window', e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  <option value="7 days">7 days</option>
+                  <option value="30 days">30 days</option>
+                  <option value="90 days">90 days</option>
+                  <option value="1 year">1 year</option>
+                  <option value="2 years">2 years</option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Request Message (Optional)
+                </label>
+                <textarea
+                  value={requestForm.request_message}
+                  onChange={(e) => handleFormChange('request_message', e.target.value)}
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Add a personal message to the user explaining why you need their data..."
+                />
+              </div>
+
+              <div style={{
+                display: 'flex',
+                gap: '1rem',
+                justifyContent: 'flex-end'
+              }}>
+                <button
+                  type="button"
+                  onClick={handleCloseCreateModal}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    background: 'white',
+                    color: '#374151',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={createRequestLoading || !requestForm.target_org_id || !requestForm.target_user_email || requestForm.requested_resources.length === 0 || requestForm.purpose.length === 0}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: 'none',
+                    borderRadius: '8px',
+                    background: createRequestLoading || !requestForm.target_org_id || !requestForm.target_user_email || requestForm.requested_resources.length === 0 || requestForm.purpose.length === 0 
+                      ? '#9ca3af' 
+                      : '#2563eb',
+                    color: 'white',
+                    cursor: createRequestLoading || !requestForm.target_org_id || !requestForm.target_user_email || requestForm.requested_resources.length === 0 || requestForm.purpose.length === 0 
+                      ? 'not-allowed' 
+                      : 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  {createRequestLoading ? 'Creating...' : 'Create Request'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

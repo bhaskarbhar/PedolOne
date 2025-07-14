@@ -65,6 +65,35 @@ async def send_data_request(
     if not target_user:
         raise HTTPException(status_code=404, detail="Target user not found")
     
+    # Get target organization info
+    target_org_id = None
+    target_org_name = "Unknown Organization"
+    
+    if target_user.get("organization_id"):
+        target_org = get_organization_by_id(target_user["organization_id"])
+        if target_org:
+            target_org_id = target_org["org_id"]
+            target_org_name = target_org["org_name"]
+    else:
+        # If user doesn't have organization_id, try to find organization through policies
+        user_policies = list(policies_collection.find({"user_id": target_user["userid"]}))
+        if user_policies:
+            # Get the most recent policy to determine organization
+            latest_policy = max(user_policies, key=lambda x: x.get("created_at", datetime.min))
+            if latest_policy.get("target_org_id"):
+                target_org = get_organization_by_id(latest_policy["target_org_id"])
+                if target_org:
+                    target_org_id = target_org["org_id"]
+                    target_org_name = target_org["org_name"]
+            elif latest_policy.get("shared_with"):
+                target_org_name = latest_policy["shared_with"]
+    
+    # If we have a target_org_name but no target_org_id, try to find the org by name
+    if target_org_name != "Unknown Organization" and not target_org_id:
+        org_by_name = organizations_collection.find_one({"org_name": target_org_name})
+        if org_by_name:
+            target_org_id = org_by_name["org_id"]
+    
     # Check if user has the requested PII data
     user_pii = user_pii_collection.find_one({"user_id": target_user["userid"]})
     if not user_pii:
@@ -90,6 +119,8 @@ async def send_data_request(
         requester_org_name=org["org_name"],
         target_user_id=target_user["userid"],
         target_user_email=target_user["email"],
+        target_org_id=target_org_id,
+        target_org_name=target_org_name,
         requested_resources=request_data.requested_resources,
         purpose=request_data.purpose,
         retention_window=request_data.retention_window,
@@ -187,32 +218,64 @@ async def get_sent_requests(org_id: str, current_user: TokenData = Depends(get_c
 
 @router.get("/org/{org_id}")
 async def get_organization_data_requests(org_id: str):
-    """Get all data requests for an organization (as requester or target)"""
-    # Get requests where this org is the requester
-    requester_requests = list(data_requests_collection.find({
+    """Get all data requests for an organization (both sent and received)"""
+    # Get organization details
+    org = get_organization_by_id(org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    
+    org_name = org["org_name"]
+    
+    # Get requests where this org is the requester (sent requests)
+    sent_requests = list(data_requests_collection.find({
         "requester_org_id": org_id
     }))
     
-    # Get requests where this org is the target (for users who have shared data with this org)
-    target_requests = list(data_requests_collection.find({
+    # Get requests where this org is the target (received requests)
+    # First try to find by target_org_id
+    received_requests = list(data_requests_collection.find({
         "target_org_id": org_id
     }))
     
-    # Combine and format
-    all_requests = requester_requests + target_requests
+    # Also check for any requests that might have this org as target_org_name
+    # This handles cases where target_org_id is null but target_org_name is set
+    name_based_requests = list(data_requests_collection.find({
+        "target_org_name": org_name
+    }))
     
-    # Sort by created_at (newest first)
+    # Combine both results, avoiding duplicates
+    all_received_requests = received_requests + name_based_requests
+    # Remove duplicates based on request_id
+    seen_ids = set()
+    unique_received_requests = []
+    for req in all_received_requests:
+        if req["request_id"] not in seen_ids:
+            seen_ids.add(req["request_id"])
+            unique_received_requests.append(req)
+    
+    received_requests = unique_received_requests
+    
+    # Combine and sort by created_at (newest first)
+    all_requests = sent_requests + received_requests
     all_requests.sort(key=lambda x: x.get("created_at", datetime.min), reverse=True)
     
     # Format response
     formatted_requests = []
     for req in all_requests:
+        is_requester = req["requester_org_id"] == org_id
+        
+        # Use stored target organization info
+        target_org_name = req.get("target_org_name", "Unknown Organization")
+        
+
+        
         formatted_requests.append({
             "request_id": req["request_id"],
             "requester_org_id": req["requester_org_id"],
             "requester_org_name": req["requester_org_name"],
             "target_user_id": req["target_user_id"],
             "target_user_email": req["target_user_email"],
+            "target_org_name": target_org_name,
             "requested_resources": req["requested_resources"],
             "purpose": req["purpose"],
             "retention_window": req["retention_window"],
@@ -222,7 +285,8 @@ async def get_organization_data_requests(org_id: str):
             "created_at": req["created_at"].isoformat(),
             "expires_at": req["expires_at"].isoformat(),
             "responded_at": req.get("responded_at").isoformat() if req.get("responded_at") else None,
-            "responded_by": req.get("responded_by")
+            "responded_by": req.get("responded_by"),
+            "is_requester": is_requester
         })
     
     return formatted_requests
@@ -241,8 +305,30 @@ async def respond_to_request(
         raise HTTPException(status_code=404, detail="Request not found")
     
     # Verify user can respond to this request
-    if request["target_user_id"] != current_user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    # Allow the target user OR an admin of the target organization to respond
+    current_user_doc = users_collection.find_one({"userid": current_user.user_id})
+    if not current_user_doc:
+        raise HTTPException(status_code=403, detail="User not found")
+    
+    can_respond = False
+    
+    # Check if current user is the target user
+    if request["target_user_id"] == current_user.user_id:
+        can_respond = True
+    # Check if current user is an admin of the target organization
+    elif (current_user_doc.get("user_type") == "organization" and 
+          current_user_doc.get("organization_id") and
+          request.get("target_org_id") == current_user_doc.get("organization_id")):
+        can_respond = True
+    # Fallback: check if target_org_name matches current user's organization name
+    elif (current_user_doc.get("user_type") == "organization" and
+          current_user_doc.get("organization_id")):
+        current_org = get_organization_by_id(current_user_doc["organization_id"])
+        if current_org and request.get("target_org_name") == current_org["org_name"]:
+            can_respond = True
+    
+    if not can_respond:
+        raise HTTPException(status_code=403, detail="Access denied. Only the target user or organization admin can respond to this request.")
     
     # Check if request is still pending
     if request["status"] != "pending":
@@ -360,4 +446,6 @@ async def get_request_stats(user_id: int, current_user: TokenData = Depends(get_
         "expired": data_requests_collection.count_documents({"target_user_id": user_id, "status": "expired"})
     }
     
-    return stats 
+    return stats
+
+ 
