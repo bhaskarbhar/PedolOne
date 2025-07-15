@@ -359,9 +359,13 @@ async def get_organization_data_categories(org_id: str):
 
 @router.get("/org-dashboard/{org_id}/logs")
 def get_org_access_logs(org_id: str, limit: int = 10):
-    """Get recent access logs for an organization's PII by fintech_id"""
+    """Get recent access logs for an organization's PII by fintech_id, requester_org_id, or responder_org_id"""
     logs = list(logs_collection.find(
-        {"fintech_id": org_id},
+        {"$or": [
+            {"fintech_id": org_id},
+            {"requester_org_id": org_id},
+            {"responder_org_id": org_id}
+        ]},
         sort=[("created_at", -1)],
         limit=limit
     ))
@@ -370,7 +374,7 @@ def get_org_access_logs(org_id: str, limit: int = 10):
         log["_id"] = str(log["_id"])
         log["created_at"] = log["created_at"].isoformat()
         # For frontend compatibility: always provide fintechName
-        log["fintechId"] = log.get("fintech_id")
+        log["fintechId"] = log.get("fintech_id") or log.get("requester_org_id") or log.get("responder_org_id")
     return jsonable_encoder(logs)
 
 @router.get("/org-dashboard/{org_id}/data_categories")
@@ -400,3 +404,24 @@ def get_org_dashboard_data_categories(org_id: str):
             "unique_users": total_users
         })
     return {"data_categories": categories}
+
+@router.get("/org-dashboard/{org_id}/contract-logs")
+def get_org_contract_logs(org_id: str, limit: int = 20):
+    """Get contract creation/response logs for an organization (by source or target org_id)"""
+    logs = list(logs_collection.find(
+        {
+            "$and": [
+                {"log_type": {"$in": ["contract_creation", "contract_response"]}},
+                {"$or": [
+                    {"source_org_id": org_id},
+                    {"target_org_id": org_id}
+                ]}
+            ]
+        },
+        sort=[("created_at", -1)],
+        limit=limit
+    ))
+    for log in logs:
+        log["_id"] = str(log["_id"])
+        log["created_at"] = log["created_at"].isoformat()
+    return jsonable_encoder(logs)

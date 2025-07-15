@@ -232,7 +232,9 @@ async def send_data_request(
         "ip_address": client_ip,
         "data_source": "individual",
         "created_at": created_at,
-        "request_id": request_id
+        "request_id": request_id,
+        "requester_org_id": org["org_id"],  # Org making the request
+        "responder_org_id": target_org_id     # Org of the user whose data is being requested (if any)
     }
     logs_collection.insert_one(log_entry)
     
@@ -515,9 +517,9 @@ async def respond_to_request(
             client_ip = http_request.headers.get("X-Real-IP")
         elif http_request.client:
             client_ip = http_request.client.host
-    
+
     log_entry = {
-        "user_id": current_user.user_id,
+        "user_id": request["target_user_id"],  # Always use the target user's ID
         "fintech_name": request["requester_org_name"],
         "resource_name": ", ".join(request["requested_resources"]),
         "purpose": request["purpose"],
@@ -526,7 +528,9 @@ async def respond_to_request(
         "data_source": "individual",
         "created_at": datetime.utcnow(),
         "request_id": response_data.request_id,
-        "response_status": response_data.status
+        "response_status": response_data.status,
+        "requester_org_id": request["requester_org_id"],  # Org who requested
+        "responder_org_id": request.get("target_org_id")  # Org who accepted/responded (if any)
     }
     logs_collection.insert_one(log_entry)
     

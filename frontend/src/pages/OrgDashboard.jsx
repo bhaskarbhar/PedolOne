@@ -122,6 +122,23 @@ export default function OrgDashboard() {
   const [contractBasedOrganizations, setContractBasedOrganizations] = useState([]);
   const [selectedOrgContractData, setSelectedOrgContractData] = useState(null);
 
+  // Add state for contract logs
+  const [contractLogs, setContractLogs] = useState([]);
+
+  // Fetch contract logs when orgIdToUse changes
+  useEffect(() => {
+    const fetchContractLogs = async () => {
+      try {
+        const api = createAxiosInstance();
+        const res = await api.get(`/policy/org-dashboard/${orgIdToUse}/contract-logs`);
+        setContractLogs(res.data || []);
+      } catch (err) {
+        setContractLogs([]);
+      }
+    };
+    fetchContractLogs();
+  }, [orgIdToUse]);
+
   useEffect(() => {
     // If user is org admin but has no org_id, skip auto-fetch
     if (!user || (user.user_type === 'organization' && !user.organization_id && !orgInfo)) {
@@ -735,6 +752,7 @@ export default function OrgDashboard() {
     { id: 'users', label: 'User Management', icon: <Users size={16} /> },
     { id: 'data_requests', label: 'Data Requests', icon: <FileText size={16} /> },
     { id: 'contracts', label: 'Contracts', icon: <FileText size={16} /> },
+    { id: 'contract_logs', label: 'Contract Logs', icon: <Database size={16} /> },
     { id: 'audit_logs', label: 'Audit Logs', icon: <Database size={16} /> },
     { id: 'data_categories', label: 'Data Categories', icon: <Database size={16} /> },
   ];
@@ -1394,6 +1412,37 @@ export default function OrgDashboard() {
                   );
                 })()}
               </div>
+            </div>
+          )}
+          {activeTab === 'contract_logs' && (
+            <div style={{ background: 'white', borderRadius: 8, boxShadow: '0 2px 8px #0001', padding: '2rem', marginTop: '2rem' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1.5rem' }}>Contract Logs</h2>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: '#f3f4f6' }}>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Contract ID</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Created At</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Source Org ID</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Target Org ID</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Contract Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {contractLogs.length === 0 ? (
+                    <tr><td colSpan={5} style={{ textAlign: 'center', padding: '1.5rem', color: '#6b7280' }}>No contract logs found.</td></tr>
+                  ) : (
+                    contractLogs.map(log => (
+                      <tr key={log._id}>
+                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{log.contract_id}</td>
+                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{new Date(log.created_at).toLocaleString()}</td>
+                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{log.source_org_id}</td>
+                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{log.target_org_id}</td>
+                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{log.log_type === 'contract_creation' ? 'Contract Creation' : log.log_type === 'contract_response' ? 'Contract Response' : log.log_type}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           )}
           {activeTab === 'audit_logs' && (
