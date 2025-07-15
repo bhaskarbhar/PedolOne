@@ -94,6 +94,79 @@ async def send_data_request(
         if org_by_name:
             target_org_id = org_by_name["org_id"]
     
+    # Check if there's an active contract between the organizations
+    if target_org_id:
+        active_contract = inter_org_contracts_collection.find_one({
+            "$or": [
+                {"source_org_id": org["org_id"], "target_org_id": target_org_id},
+                {"source_org_id": target_org_id, "target_org_id": org["org_id"]}
+            ],
+            "status": "active"
+        })
+        
+        if not active_contract:
+            raise HTTPException(
+                status_code=400, 
+                detail="No active inter-organization contract found. Please establish a contract before sending data requests."
+            )
+        
+        # Check if requested resources and purposes are allowed by the contract
+        contract_allowed_resources = []
+        contract_allowed_purposes = {}
+        
+        # Handle both old and new contract structures
+        if active_contract.get("resources_allowed"):
+            # New structure with ContractResource objects
+            for resource in active_contract.get("resources_allowed", []):
+                if isinstance(resource, dict) and "resource_name" in resource:
+                    resource_name = resource["resource_name"]
+                    contract_allowed_resources.append(resource_name)
+                    # Store allowed purposes for this resource
+                    if "purpose" in resource:
+                        contract_allowed_purposes[resource_name] = resource["purpose"]
+                else:
+                    # Fallback if resource is just a string
+                    contract_allowed_resources.append(str(resource))
+        elif active_contract.get("allowed_resources"):
+            # Old structure with simple list
+            allowed_resources = active_contract.get("allowed_resources", [])
+            if isinstance(allowed_resources, str):
+                contract_allowed_resources = [allowed_resources]
+            else:
+                contract_allowed_resources = allowed_resources
+        
+        # Check if all requested resources are allowed
+        unauthorized_resources = [r for r in request_data.requested_resources if r not in contract_allowed_resources]
+        if unauthorized_resources:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The following resources are not allowed by the active contract: {', '.join(unauthorized_resources)}"
+            )
+        
+        # Check if all requested purposes are allowed for each resource
+        unauthorized_purposes = []
+        for resource in request_data.requested_resources:
+            if resource in contract_allowed_purposes:
+                resource_allowed_purposes = contract_allowed_purposes[resource]
+                for purpose in request_data.purpose:
+                    if purpose not in resource_allowed_purposes:
+                        unauthorized_purposes.append(f"{purpose} for {resource}")
+            else:
+                # If no specific purposes defined for this resource in contract, 
+                # assume all purposes are allowed (backward compatibility)
+                pass
+        
+        if unauthorized_purposes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The following purposes are not allowed by the active contract: {', '.join(unauthorized_purposes)}"
+            )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Target user's organization could not be determined. Data requests require an active inter-organization contract."
+        )
+    
     # Check if user has the requested PII data
     user_pii = user_pii_collection.find_one({"user_id": target_user["userid"]})
     if not user_pii:
@@ -351,42 +424,75 @@ async def respond_to_request(
         {"$set": update_data}
     )
     
-    # If approved, create policies automatically
+    # If approved, create policies automatically based on inter-organization contracts
     if response_data.status == "approved":
         from routers.policy import create_policy_internal
         from models import UserInputPII
+        
+        # Get active contract between organizations
+        active_contract = inter_org_contracts_collection.find_one({
+            "$or": [
+                {"source_org_id": request["requester_org_id"], "target_org_id": request.get("target_org_id")},
+                {"source_org_id": request.get("target_org_id"), "target_org_id": request["requester_org_id"]}
+            ],
+            "status": "active"
+        })
         
         # Get user's PII data
         user_pii = user_pii_collection.find_one({"user_id": current_user.user_id})
         if user_pii:
             for resource in request["requested_resources"]:
-                pii_entry = next((pii for pii in user_pii.get("pii", []) if pii["resource"] == resource), None)
-                if pii_entry:
-                    try:
-                        from helpers import decrypt_pii
-                        pii_value = decrypt_pii(pii_entry["original"])
-                        
-                        # Get client IP
-                        client_ip = "unknown"
-                        if http_request:
-                            forwarded_for = http_request.headers.get("X-Forwarded-For")
-                            if forwarded_for:
-                                client_ip = forwarded_for.split(",")[0].strip()
-                            elif http_request.headers.get("X-Real-IP"):
-                                client_ip = http_request.headers.get("X-Real-IP")
-                            elif http_request.client:
-                                client_ip = http_request.client.host
-                        
-                        # Create policy
-                        policy_input = UserInputPII(pii_value=pii_value, resource=resource)
-                        create_policy_internal(
-                            policy_input, 
-                            user_id=current_user.user_id,
-                            ip_address=client_ip,
-                            target_org_id=request["requester_org_id"]
-                        )
-                    except Exception as e:
-                        print(f"Error creating policy for {resource}: {e}")
+                # Check if resource is allowed by contract
+                contract_allowed_resources = []
+                
+                # Handle both old and new contract structures
+                if active_contract.get("resources_allowed"):
+                    # New structure with ContractResource objects
+                    for contract_resource in active_contract.get("resources_allowed", []):
+                        if isinstance(contract_resource, dict) and "resource_name" in contract_resource:
+                            contract_allowed_resources.append(contract_resource["resource_name"])
+                        else:
+                            # Fallback if resource is just a string
+                            contract_allowed_resources.append(str(contract_resource))
+                elif active_contract.get("allowed_resources"):
+                    # Old structure with simple list
+                    allowed_resources = active_contract.get("allowed_resources", [])
+                    if isinstance(allowed_resources, str):
+                        contract_allowed_resources = [allowed_resources]
+                    else:
+                        contract_allowed_resources = allowed_resources
+                
+                if active_contract and resource in contract_allowed_resources:
+                    pii_entry = next((pii for pii in user_pii.get("pii", []) if pii["resource"] == resource), None)
+                    if pii_entry:
+                        try:
+                            from helpers import decrypt_pii
+                            pii_value = decrypt_pii(pii_entry["original"])
+                            
+                            # Get client IP
+                            client_ip = "unknown"
+                            if http_request:
+                                forwarded_for = http_request.headers.get("X-Forwarded-For")
+                                if forwarded_for:
+                                    client_ip = forwarded_for.split(",")[0].strip()
+                                elif http_request.headers.get("X-Real-IP"):
+                                    client_ip = http_request.headers.get("X-Real-IP")
+                                elif http_request.client:
+                                    client_ip = http_request.client.host
+                            
+                            # Create policy with contract information
+                            policy_input = UserInputPII(pii_value=pii_value, resource=resource)
+                            create_policy_internal(
+                                policy_input, 
+                                user_id=current_user.user_id,
+                                ip_address=client_ip,
+                                target_org_id=request["requester_org_id"],
+                                contract_id=active_contract["contract_id"]
+                            )
+                        except Exception as e:
+                            print(f"Error creating policy for {resource}: {e}")
+                else:
+                    print(f"Resource {resource} not allowed by contract or no active contract found")
     
     # Send WebSocket notification to requester organization
     await send_user_update(
@@ -447,5 +553,118 @@ async def get_request_stats(user_id: int, current_user: TokenData = Depends(get_
     }
     
     return stats
+
+@router.get("/available-organizations/{org_id}")
+async def get_available_organizations_for_requests(
+    org_id: str, 
+    current_user: TokenData = Depends(get_current_user)
+):
+    """Get all organizations with active contracts that can receive data requests from this organization"""
+    
+    # Verify user is admin of this organization
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user or user.get("organization_id") != org_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Get organization details
+    org = get_organization_by_id(org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    
+    # Find all active contracts where this org is the source
+    active_contracts = list(inter_org_contracts_collection.find({
+        "source_org_id": org_id,
+        "status": "active"
+    }))
+    
+    # Also find contracts where this org is the target (bidirectional contracts)
+    target_contracts = list(inter_org_contracts_collection.find({
+        "target_org_id": org_id,
+        "status": "active"
+    }))
+    
+    # Combine and process contracts
+    available_organizations = {}
+    
+    # Process source contracts (this org can send requests to target orgs)
+    for contract in active_contracts:
+        target_org_id = contract["target_org_id"]
+        target_org_name = contract["target_org_name"]
+        
+        if target_org_id not in available_organizations:
+            available_organizations[target_org_id] = {
+                "org_id": target_org_id,
+                "org_name": target_org_name,
+                "allowed_resources": [],
+                "allowed_purposes": {},
+                "contract_id": contract["contract_id"]
+            }
+        
+        # Add allowed resources and purposes from this contract
+        if contract.get("resources_allowed"):
+            for resource in contract.get("resources_allowed", []):
+                if isinstance(resource, dict) and "resource_name" in resource:
+                    resource_name = resource["resource_name"]
+                    if resource_name not in available_organizations[target_org_id]["allowed_resources"]:
+                        available_organizations[target_org_id]["allowed_resources"].append(resource_name)
+                    
+                    # Add purposes for this resource
+                    if "purpose" in resource:
+                        if resource_name not in available_organizations[target_org_id]["allowed_purposes"]:
+                            available_organizations[target_org_id]["allowed_purposes"][resource_name] = []
+                        available_organizations[target_org_id]["allowed_purposes"][resource_name].extend(resource["purpose"])
+        
+        elif contract.get("allowed_resources"):
+            allowed_resources = contract.get("allowed_resources", [])
+            if isinstance(allowed_resources, str):
+                allowed_resources = [allowed_resources]
+            
+            for resource in allowed_resources:
+                if resource not in available_organizations[target_org_id]["allowed_resources"]:
+                    available_organizations[target_org_id]["allowed_resources"].append(resource)
+    
+    # Process target contracts (bidirectional - this org can also send requests to source orgs)
+    for contract in target_contracts:
+        source_org_id = contract["source_org_id"]
+        source_org_name = contract["source_org_name"]
+        
+        if source_org_id not in available_organizations:
+            available_organizations[source_org_id] = {
+                "org_id": source_org_id,
+                "org_name": source_org_name,
+                "allowed_resources": [],
+                "allowed_purposes": {},
+                "contract_id": contract["contract_id"]
+            }
+        
+        # Add allowed resources and purposes from this contract
+        if contract.get("resources_allowed"):
+            for resource in contract.get("resources_allowed", []):
+                if isinstance(resource, dict) and "resource_name" in resource:
+                    resource_name = resource["resource_name"]
+                    if resource_name not in available_organizations[source_org_id]["allowed_resources"]:
+                        available_organizations[source_org_id]["allowed_resources"].append(resource_name)
+                    
+                    # Add purposes for this resource
+                    if "purpose" in resource:
+                        if resource_name not in available_organizations[source_org_id]["allowed_purposes"]:
+                            available_organizations[source_org_id]["allowed_purposes"][resource_name] = []
+                        available_organizations[source_org_id]["allowed_purposes"][resource_name].extend(resource["purpose"])
+        
+        elif contract.get("allowed_resources"):
+            allowed_resources = contract.get("allowed_resources", [])
+            if isinstance(allowed_resources, str):
+                allowed_resources = [allowed_resources]
+            
+            for resource in allowed_resources:
+                if resource not in available_organizations[source_org_id]["allowed_resources"]:
+                    available_organizations[source_org_id]["allowed_resources"].append(resource)
+    
+    # Remove duplicates from purposes lists
+    for org_data in available_organizations.values():
+        for resource_name, purposes in org_data["allowed_purposes"].items():
+            org_data["allowed_purposes"][resource_name] = list(set(purposes))
+    
+    return list(available_organizations.values())
 
  

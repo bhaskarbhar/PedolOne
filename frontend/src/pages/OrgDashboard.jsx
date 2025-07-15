@@ -27,6 +27,18 @@ export default function OrgDashboard() {
   const [dataRequests, setDataRequests] = useState([]);
   // State for inter-org contracts
   const [contracts, setContracts] = useState([]);
+  const [sentContracts, setSentContracts] = useState([]);
+  const [receivedContracts, setReceivedContracts] = useState([]);
+  const [contractStats, setContractStats] = useState({
+    total_sent: 0,
+    total_received: 0,
+    pending_sent: 0,
+    pending_received: 0,
+    active_sent: 0,
+    active_received: 0,
+    rejected_sent: 0,
+    rejected_received: 0
+  });
   // State for audit logs
   const [auditLogs, setAuditLogs] = useState([]);
   // State for data categories
@@ -50,6 +62,7 @@ export default function OrgDashboard() {
   const [createRequestLoading, setCreateRequestLoading] = useState(false);
   const [createRequestError, setCreateRequestError] = useState("");
   const [availableOrganizations, setAvailableOrganizations] = useState([]);
+  const [allOrganizations, setAllOrganizations] = useState([]);
   const [availableUsers, setAvailableUsers] = useState([]);
   const [availableResources, setAvailableResources] = useState([]);
   const [selectedOrgId, setSelectedOrgId] = useState("");
@@ -64,8 +77,50 @@ export default function OrgDashboard() {
     request_message: ""
   });
 
+  // Contract state
+  const [showCreateContractModal, setShowCreateContractModal] = useState(false);
+  const [createContractLoading, setCreateContractLoading] = useState(false);
+  const [createContractError, setCreateContractError] = useState("");
+  const [contractForm, setContractForm] = useState({
+    target_org_id: "",
+    resources_allowed: [],
+    approval_message: ""
+  });
+  
+  // Contract resource form state
+  const [contractResourceForm, setContractResourceForm] = useState({
+    resource_name: "",
+    purpose: [],
+    retention_window: "30 days"
+  });
+  
+  // Available resources for contracts
+  const [availableContractResources] = useState([
+    "aadhaar", "pan", "account", "ifsc", "creditcard", "debitcard", 
+    "gst", "itform16", "upi", "passport", "drivinglicense"
+  ]);
+  
+  const [availablePurposes] = useState([
+    "KYC verification", "Identity validation", "Account opening", "Tax compliance", 
+    "Income verification", "Loan processing", "Account verification", "Loan disbursement",
+    "Transaction processing", "Bank branch verification", "Fund transfer routing",
+    "NEFT/RTGS processing", "Credit profiling", "Fraud risk analysis", "Credit limit assessment",
+    "Spending analysis", "Account validation", "Transaction monitoring", "Business KYC",
+    "Financial eligibility analysis", "Corporate account verification", "Income validation",
+    "Loan underwriting", "Credit assessment", "Digital payment mapping", "Fraud detection",
+    "Transaction routing", "Cross-border KYC", "NRI account processing", "Alternate identity proof",
+    "Address verification"
+  ]);
+
+  // Contract filter state
+  const [contractFilter, setContractFilter] = useState('all'); // 'all', 'sent', 'received'
+
   // Always declare orgIdToUse before any useEffect or logic that uses it
   const orgIdToUse = orgIdConfirmed ? orgIdInput : (orgInfo?.org_id || user?.organization_id);
+
+  // New state for contract-based restrictions
+  const [contractBasedOrganizations, setContractBasedOrganizations] = useState([]);
+  const [selectedOrgContractData, setSelectedOrgContractData] = useState(null);
 
   useEffect(() => {
     // If user is org admin but has no org_id, skip auto-fetch
@@ -101,7 +156,27 @@ export default function OrgDashboard() {
         
         // Fetch inter-org contracts
         const contractsResponse = await api.get(`/inter-org-contracts/org/${orgId}`);
-        setContracts(contractsResponse.data || []);
+        const allContracts = contractsResponse.data || [];
+        setContracts(allContracts);
+        
+        // Separate sent and received contracts
+        const sent = allContracts.filter(contract => contract.is_requester);
+        const received = allContracts.filter(contract => !contract.is_requester);
+        setSentContracts(sent);
+        setReceivedContracts(received);
+        
+        // Calculate contract statistics
+        const stats = {
+          total_sent: sent.length,
+          total_received: received.length,
+          pending_sent: sent.filter(c => c.approval_status === 'pending').length,
+          pending_received: received.filter(c => c.approval_status === 'pending').length,
+          active_sent: sent.filter(c => c.status === 'active').length,
+          active_received: received.filter(c => c.status === 'active').length,
+          rejected_sent: sent.filter(c => c.approval_status === 'rejected').length,
+          rejected_received: received.filter(c => c.approval_status === 'rejected').length
+        };
+        setContractStats(stats);
         
         // Fetch audit logs
         const logsResponse = await api.get(`/policy/org-dashboard/${orgIdToUse}/logs`);
@@ -266,13 +341,28 @@ export default function OrgDashboard() {
   const fetchAvailableOrganizations = async () => {
     try {
       const api = createAxiosInstance();
-      const response = await api.get('/organization/list/organizations');
-      const allOrgs = response.data.organizations || [];
-      // Filter out the current organization
+      // Use the new endpoint that only returns organizations with active contracts
+      const response = await api.get(`/data-requests/available-organizations/${orgIdToUse}`);
+      const orgsWithContracts = response.data || [];
+      setContractBasedOrganizations(orgsWithContracts);
+      
+      // Also fetch all organizations for backward compatibility (contract creation)
+      const allOrgsResponse = await api.get('/organization/list/organizations');
+      const allOrgs = allOrgsResponse.data.organizations || [];
       const filteredOrgs = allOrgs.filter(org => org.org_id !== orgIdToUse);
       setAvailableOrganizations(filteredOrgs);
     } catch (err) {
       console.error('Error fetching available organizations:', err);
+      // Fallback to fetching all organizations
+      try {
+        const api = createAxiosInstance();
+        const response = await api.get('/organization/list/organizations');
+        const allOrgs = response.data.organizations || [];
+        const filteredOrgs = allOrgs.filter(org => org.org_id !== orgIdToUse);
+        setAvailableOrganizations(filteredOrgs);
+      } catch (fallbackErr) {
+        console.error('Error fetching all organizations:', fallbackErr);
+      }
     }
   };
 
@@ -310,6 +400,7 @@ export default function OrgDashboard() {
     setShowCreateModal(true);
     setCreateRequestError("");
     setSelectedOrgId("");
+    setSelectedOrgContractData(null);
     setRequestForm({
       target_org_id: "",
       target_user_email: "",
@@ -318,8 +409,8 @@ export default function OrgDashboard() {
       retention_window: "30 days",
       request_message: ""
     });
-    await fetchAvailableOrganizations();
-    await fetchAvailableResources();
+    await fetchAvailableOrganizations(); // This now fetches contract-based organizations
+    setAvailableResources([]); // Reset resources until organization is selected
   };
 
   const handleCloseCreateModal = () => {
@@ -349,6 +440,34 @@ export default function OrgDashboard() {
       return;
     }
 
+    // Additional contract validation
+    if (!selectedOrgContractData) {
+      setCreateRequestError("No active contract found for the selected organization");
+      setCreateRequestLoading(false);
+      return;
+    }
+
+    // Validate that all requested resources are allowed by contract
+    const unauthorizedResources = requestForm.requested_resources.filter(
+      resource => !selectedOrgContractData.allowed_resources.includes(resource)
+    );
+    if (unauthorizedResources.length > 0) {
+      setCreateRequestError(`The following resources are not allowed by the contract: ${unauthorizedResources.join(', ')}`);
+      setCreateRequestLoading(false);
+      return;
+    }
+
+    // Validate that all requested purposes are allowed for the selected resources
+    const allowedPurposes = getAvailablePurposesForSelectedResources();
+    const unauthorizedPurposes = requestForm.purpose.filter(
+      purpose => !allowedPurposes.includes(purpose)
+    );
+    if (unauthorizedPurposes.length > 0) {
+      setCreateRequestError(`The following purposes are not allowed by the contract: ${unauthorizedPurposes.join(', ')}`);
+      setCreateRequestLoading(false);
+      return;
+    }
+
     try {
       const api = createAxiosInstance();
       await api.post('/data-requests/send-request', requestForm);
@@ -372,6 +491,11 @@ export default function OrgDashboard() {
   };
 
   const handleResourceToggle = (resource) => {
+    // Only allow resources that are in the contract
+    if (!selectedOrgContractData || !selectedOrgContractData.allowed_resources.includes(resource)) {
+      return; // Don't allow selection of unauthorized resources
+    }
+    
     setRequestForm(prev => ({
       ...prev,
       requested_resources: prev.requested_resources.includes(resource)
@@ -381,6 +505,12 @@ export default function OrgDashboard() {
   };
 
   const handlePurposeToggle = (purpose) => {
+    // Only allow purposes that are permitted for the selected resources
+    const allowedPurposes = getAvailablePurposesForSelectedResources();
+    if (!allowedPurposes.includes(purpose)) {
+      return; // Don't allow selection of unauthorized purposes
+    }
+    
     setRequestForm(prev => ({
       ...prev,
       purpose: prev.purpose.includes(purpose)
@@ -389,18 +519,213 @@ export default function OrgDashboard() {
     }));
   };
 
+  const getAvailablePurposesForSelectedResources = () => {
+    if (!selectedOrgContractData || !selectedOrgContractData.allowed_purposes) {
+      return [];
+    }
+    
+    const allowedPurposes = new Set();
+    requestForm.requested_resources.forEach(resource => {
+      const resourcePurposes = selectedOrgContractData.allowed_purposes[resource] || [];
+      resourcePurposes.forEach(purpose => allowedPurposes.add(purpose));
+    });
+    
+    return Array.from(allowedPurposes);
+  };
+
   const handleOrganizationChange = async (orgId) => {
     setSelectedOrgId(orgId);
     setRequestForm(prev => ({
       ...prev,
       target_org_id: orgId,
-      target_user_email: "" // Reset user selection when org changes
+      target_user_email: "", // Reset user selection when org changes
+      requested_resources: [], // Reset resources when org changes
+      purpose: [] // Reset purposes when org changes
     }));
     
     if (orgId) {
       await fetchUsersByOrganization(orgId);
+      
+      // Find the contract data for the selected organization
+      const selectedOrgContract = contractBasedOrganizations.find(org => org.org_id === orgId);
+      if (selectedOrgContract) {
+        setSelectedOrgContractData(selectedOrgContract);
+        // Set available resources based on contract
+        setAvailableResources(selectedOrgContract.allowed_resources || []);
+      } else {
+        setSelectedOrgContractData(null);
+        setAvailableResources([]);
+      }
     } else {
       setAvailableUsers([]);
+      setSelectedOrgContractData(null);
+      setAvailableResources([]);
+    }
+  };
+
+  // Contract handlers
+  const handleOpenCreateContractModal = async () => {
+    setShowCreateContractModal(true);
+    setCreateContractError("");
+    setContractForm({
+      target_org_id: "",
+      resources_allowed: [],
+      approval_message: ""
+    });
+    setContractResourceForm({
+      resource_name: "",
+      purpose: [],
+      retention_window: "30 days"
+    });
+    
+    // Fetch all organizations in PedolOne
+    try {
+      const api = createAxiosInstance();
+      const response = await api.get('/organization/list/organizations');
+      const allOrgs = response.data.organizations || [];
+      // Filter out the current organization
+      const filteredOrgs = allOrgs.filter(org => org.org_id !== orgIdToUse);
+      setAllOrganizations(filteredOrgs);
+    } catch (err) {
+      console.error('Error fetching all organizations:', err);
+      setCreateContractError('Failed to fetch organizations');
+    }
+  };
+
+  const handleCloseCreateContractModal = () => {
+    setShowCreateContractModal(false);
+    setCreateContractError("");
+  };
+
+  const handleCreateContract = async (e) => {
+    e.preventDefault();
+    setCreateContractLoading(true);
+    setCreateContractError("");
+
+    // Validate form data
+    if (!contractForm.target_org_id) {
+      setCreateContractError("Please select a target organization");
+      setCreateContractLoading(false);
+      return;
+    }
+    if (contractForm.resources_allowed.length === 0) {
+      setCreateContractError("Please add at least one resource");
+      setCreateContractLoading(false);
+      return;
+    }
+
+    try {
+      const api = createAxiosInstance();
+      
+      // Prepare resources with proper structure
+      const resourcesWithTimestamps = contractForm.resources_allowed.map(resource => ({
+        resource_name: resource.resource_name,
+        purpose: resource.purpose,
+        retention_window: resource.retention_window,
+        created_at: new Date().toISOString(),
+        ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days from now
+        signature: "" // Will be generated by backend
+      }));
+      
+      const contractData = {
+        target_org_id: contractForm.target_org_id,
+        resources_allowed: resourcesWithTimestamps,
+        approval_message: contractForm.approval_message
+      };
+      
+      await api.post('/inter-org-contracts/create', contractData);
+      setShowCreateContractModal(false);
+      window.location.reload();
+    } catch (err) {
+      console.error('Error creating contract:', err);
+      setCreateContractError(err.response?.data?.detail || 'Failed to create contract');
+    } finally {
+      setCreateContractLoading(false);
+    }
+  };
+
+  const handleContractFormChange = (field, value) => {
+    setContractForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleContractResourceFormChange = (field, value) => {
+    setContractResourceForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleAddContractResource = () => {
+    if (!contractResourceForm.resource_name || contractResourceForm.purpose.length === 0) {
+      alert("Please select a resource and at least one purpose");
+      return;
+    }
+
+    setContractForm(prev => ({
+      ...prev,
+      resources_allowed: [...prev.resources_allowed, { ...contractResourceForm }]
+    }));
+
+    // Reset resource form
+    setContractResourceForm({
+      resource_name: "",
+      purpose: [],
+      retention_window: "30 days"
+    });
+  };
+
+  const handleRemoveContractResource = (index) => {
+    setContractForm(prev => ({
+      ...prev,
+      resources_allowed: prev.resources_allowed.filter((_, i) => i !== index)
+    }));
+  };
+
+  const handleContractResourcePurposeToggle = (purpose) => {
+    setContractResourceForm(prev => ({
+      ...prev,
+      purpose: prev.purpose.includes(purpose)
+        ? prev.purpose.filter(p => p !== purpose)
+        : [...prev.purpose, purpose]
+    }));
+  };
+
+  const handleApproveContract = async (contractId) => {
+    const response_message = prompt('Optional: Add a response message for approval');
+    
+    try {
+      const api = createAxiosInstance();
+      await api.post('/inter-org-contracts/respond', {
+        contract_id: contractId,
+        status: 'approved',
+        response_message
+      });
+      // Refresh data
+      window.location.reload();
+    } catch (err) {
+      console.error('Error approving contract:', err);
+      alert('Failed to approve contract: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleRejectContract = async (contractId) => {
+    const response_message = prompt('Optional: Add a response message for rejection');
+    
+    try {
+      const api = createAxiosInstance();
+      await api.post('/inter-org-contracts/respond', {
+        contract_id: contractId,
+        status: 'rejected',
+        response_message
+      });
+      // Refresh data
+      window.location.reload();
+    } catch (err) {
+      console.error('Error rejecting contract:', err);
+      alert('Failed to reject contract: ' + (err.response?.data?.detail || err.message));
     }
   };
 
@@ -409,6 +734,7 @@ export default function OrgDashboard() {
     { id: 'overview', label: 'Overview', icon: <Activity size={16} /> },
     { id: 'users', label: 'User Management', icon: <Users size={16} /> },
     { id: 'data_requests', label: 'Data Requests', icon: <FileText size={16} /> },
+    { id: 'contracts', label: 'Contracts', icon: <FileText size={16} /> },
     { id: 'audit_logs', label: 'Audit Logs', icon: <Database size={16} /> },
     { id: 'data_categories', label: 'Data Categories', icon: <Database size={16} /> },
   ];
@@ -502,7 +828,11 @@ export default function OrgDashboard() {
                   </div>
                   <div style={{ flex: 1, background: 'white', borderRadius: '12px', padding: '1.5rem', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
                     <div style={{ fontSize: '2rem', fontWeight: 'bold', color: '#059669' }}>{contracts.length}</div>
-                    <div style={{ color: '#6b7280' }}>Contracts</div>
+                    <div style={{ color: '#6b7280' }}>Total Contracts</div>
+                  </div>
+                  <div style={{ flex: 1, background: 'white', borderRadius: '12px', padding: '1.5rem', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                    <div style={{ fontSize: '2rem', fontWeight: 'bold', color: '#dc2626' }}>{contractStats.pending_received}</div>
+                    <div style={{ color: '#6b7280' }}>Pending Contracts</div>
                   </div>
                 </div>
               </div>
@@ -558,7 +888,7 @@ export default function OrgDashboard() {
             </div>
           )}
           {activeTab === 'data_requests' && (
-                        <div>
+            <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                 <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>Data Access Requests</h2>
                 <button
@@ -582,13 +912,37 @@ export default function OrgDashboard() {
                 </button>
               </div>
               
+              {/* Contract requirement notice */}
+              {contractBasedOrganizations.length === 0 && (
+                <div style={{ 
+                  background: '#fef3c7', 
+                  border: '1px solid #f59e0b', 
+                  borderRadius: '8px', 
+                  padding: '1rem', 
+                  marginBottom: '1.5rem',
+                  color: '#d97706'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <AlertTriangle size={20} />
+                    <strong>No Active Contracts Found</strong>
+                  </div>
+                  <div style={{ fontSize: '0.875rem' }}>
+                    You need to establish inter-organization contracts before you can send data access requests. 
+                    Go to the "Contracts" tab to create contracts with other organizations.
+                  </div>
+                </div>
+              )}
+              
               <div style={{ background: 'white', borderRadius: '12px', padding: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
                 {!Array.isArray(dataRequests) || dataRequests.length === 0 ? (
                   <div style={{ color: '#d97706', textAlign: 'center', padding: '2rem' }}>
                     <FileText size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
                     <div>No data access requests found for this organization.</div>
                     <div style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
-                      Click "Create Request" to send a new data access request to a user.
+                      {contractBasedOrganizations.length > 0 
+                        ? 'Click "Create Request" to send a new data access request to a user.'
+                        : 'Create contracts with other organizations first to enable data requests.'
+                      }
                     </div>
                   </div>
                 ) : (
@@ -740,8 +1094,307 @@ export default function OrgDashboard() {
                     </tbody>
                   </table>
                 )}
+              </div>
+            </div>
+          )}
+          {activeTab === 'contracts' && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>Inter-Organization Contracts</h2>
+                <button
+                  onClick={handleOpenCreateContractModal}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    background: '#2563eb',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '0.75rem 1rem',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  <Plus size={16} />
+                  Create Contract
+                </button>
+              </div>
+              
+              {/* Contract Statistics */}
+              <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
+                <div style={{ flex: 1, background: 'white', borderRadius: '8px', padding: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                  <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.5rem', color: '#1e40af' }}>Sent Contracts</h3>
+                  <div style={{ display: 'flex', gap: '1rem' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#2563eb' }}>{contractStats.total_sent}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>Total</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#d97706' }}>{contractStats.pending_sent}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>Pending</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#059669' }}>{contractStats.active_sent}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>Active</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#dc2626' }}>{contractStats.rejected_sent}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>Rejected</div>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ flex: 1, background: 'white', borderRadius: '8px', padding: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                  <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.5rem', color: '#d97706' }}>Received Contracts</h3>
+                  <div style={{ display: 'flex', gap: '1rem' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#2563eb' }}>{contractStats.total_received}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>Total</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#d97706' }}>{contractStats.pending_received}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>Pending</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#059669' }}>{contractStats.active_received}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>Active</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#dc2626' }}>{contractStats.rejected_received}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>Rejected</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Contract Filter */}
+              <div style={{ marginBottom: '1rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    onClick={() => setContractFilter('all')}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      border: contractFilter === 'all' ? '2px solid #2563eb' : '2px solid #e5e7eb',
+                      borderRadius: '20px',
+                      background: contractFilter === 'all' ? '#dbeafe' : 'white',
+                      color: contractFilter === 'all' ? '#1e40af' : '#374151',
+                      cursor: 'pointer',
+                      fontSize: '0.875rem',
+                      fontWeight: '500'
+                    }}
+                  >
+                    All Contracts ({contracts.length})
+                  </button>
+                  <button
+                    onClick={() => setContractFilter('sent')}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      border: contractFilter === 'sent' ? '2px solid #2563eb' : '2px solid #e5e7eb',
+                      borderRadius: '20px',
+                      background: contractFilter === 'sent' ? '#dbeafe' : 'white',
+                      color: contractFilter === 'sent' ? '#1e40af' : '#374151',
+                      cursor: 'pointer',
+                      fontSize: '0.875rem',
+                      fontWeight: '500'
+                    }}
+                  >
+                    Sent ({contractStats.total_sent})
+                  </button>
+                  <button
+                    onClick={() => setContractFilter('received')}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      border: contractFilter === 'received' ? '2px solid #2563eb' : '2px solid #e5e7eb',
+                      borderRadius: '20px',
+                      background: contractFilter === 'received' ? '#dbeafe' : 'white',
+                      color: contractFilter === 'received' ? '#1e40af' : '#374151',
+                      cursor: 'pointer',
+                      fontSize: '0.875rem',
+                      fontWeight: '500'
+                    }}
+                  >
+                    Received ({contractStats.total_received})
+                  </button>
+                </div>
+              </div>
+              
+              <div style={{ background: 'white', borderRadius: '12px', padding: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+                {(() => {
+                  // Filter contracts based on selected filter
+                  let filteredContracts = contracts;
+                  if (contractFilter === 'sent') {
+                    filteredContracts = contracts.filter(contract => contract.is_requester);
+                  } else if (contractFilter === 'received') {
+                    filteredContracts = contracts.filter(contract => !contract.is_requester);
+                  }
+                  
+                  if (!Array.isArray(filteredContracts) || filteredContracts.length === 0) {
+                    return (
+                      <div style={{ color: '#d97706', textAlign: 'center', padding: '2rem' }}>
+                        <FileText size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                        <div>No {contractFilter === 'all' ? '' : contractFilter} contracts found for this organization.</div>
+                        <div style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
+                          {contractFilter === 'all' ? 'Click "Create Contract" to establish a new data sharing agreement.' : 
+                           contractFilter === 'sent' ? 'You haven\'t sent any contract requests yet.' :
+                           'You haven\'t received any contract requests yet.'}
                         </div>
                       </div>
+                    );
+                  }
+                  
+                  return (
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: '#f3f4f6' }}>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Type</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Contract ID</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Organization</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Resources</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Purpose</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Retention</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Status</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Created</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Expires</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredContracts.map((contract, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                              <span style={{
+                                padding: '0.25rem 0.75rem',
+                                borderRadius: '12px',
+                                fontSize: '0.75rem',
+                                fontWeight: '500',
+                                background: contract.is_requester ? '#dbeafe' : '#fef3c7',
+                                color: contract.is_requester ? '#1e40af' : '#d97706'
+                              }}>
+                                {contract.is_requester ? 'Sent' : 'Received'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                              <code style={{ background: '#f3f4f6', padding: '0.25rem 0.5rem', borderRadius: '4px' }}>
+                                {contract.contract_id?.substring(0, 8)}...
+                              </code>
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                              {contract.is_requester ? contract.target_org_name : contract.source_org_name}
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                                {Array.isArray(contract.resources_allowed) ? contract.resources_allowed.map((resource, i) => (
+                                  <span key={i} style={{
+                                    background: '#dbeafe',
+                                    color: '#1e40af',
+                                    padding: '0.25rem 0.5rem',
+                                    borderRadius: '12px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '500'
+                                  }}>
+                                    {resource.resource_name}
+                                  </span>
+                                )) : (
+                                  <span style={{
+                                    background: '#dbeafe',
+                                    color: '#1e40af',
+                                    padding: '0.25rem 0.5rem',
+                                    borderRadius: '12px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '500'
+                                  }}>
+                                    {contract.resources_allowed}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>
+                              {Array.isArray(contract.resources_allowed) ? 
+                                contract.resources_allowed.map(r => r.purpose).flat().join(', ') : 
+                                contract.purposes ? (Array.isArray(contract.purposes) ? contract.purposes.join(', ') : contract.purposes) : 'N/A'
+                              }
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>
+                              {Array.isArray(contract.resources_allowed) ? 
+                                contract.resources_allowed.map(r => r.retention_window).join(', ') : 
+                                contract.retention_window || 'N/A'
+                              }
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>
+                              <span style={{
+                                padding: '0.25rem 0.75rem',
+                                borderRadius: '12px',
+                                fontSize: '0.75rem',
+                                fontWeight: '500',
+                                background: contract.status === 'active' ? '#dcfce7' : 
+                                           contract.status === 'rejected' ? '#fee2e2' : 
+                                           contract.status === 'expired' ? '#fef3c7' : '#dbeafe',
+                                color: contract.status === 'active' ? '#166534' : 
+                                       contract.status === 'rejected' ? '#dc2626' : 
+                                       contract.status === 'expired' ? '#d97706' : '#1e40af'
+                              }}>
+                                {contract.status}
+                              </span>
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                              {new Date(contract.created_at).toLocaleDateString()}
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                              {new Date(contract.ends_at).toLocaleDateString()}
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>
+                              {contract.approval_status === 'pending' && !contract.is_requester ? (
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                  <button 
+                                    style={{ 
+                                      background: '#059669', 
+                                      color: 'white', 
+                                      border: 'none', 
+                                      borderRadius: '6px', 
+                                      padding: '0.5rem 0.75rem', 
+                                      cursor: 'pointer',
+                                      fontSize: '0.75rem',
+                                      fontWeight: '500'
+                                    }}
+                                    onClick={() => handleApproveContract(contract.contract_id)}
+                                  >
+                                    Approve
+                                  </button>
+                                  <button 
+                                    style={{ 
+                                      background: '#dc2626', 
+                                      color: 'white', 
+                                      border: 'none', 
+                                      borderRadius: '6px', 
+                                      padding: '0.5rem 0.75rem', 
+                                      cursor: 'pointer',
+                                      fontSize: '0.75rem',
+                                      fontWeight: '500'
+                                    }}
+                                    onClick={() => handleRejectContract(contract.contract_id)}
+                                  >
+                                    Reject
+                                  </button>
+                                </div>
+                              ) : (
+                                <span style={{ 
+                                  color: contract.approval_status === 'approved' ? '#059669' : 
+                                         contract.approval_status === 'rejected' ? '#dc2626' : '#6b7280',
+                                  fontSize: '0.875rem'
+                                }}>
+                                  {contract.approval_status}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  );
+                })()}
+              </div>
+            </div>
           )}
           {activeTab === 'audit_logs' && (
               <div>
@@ -884,13 +1537,18 @@ export default function OrgDashboard() {
                     fontSize: '0.875rem'
                   }}
                 >
-                  <option value="">Select an organization...</option>
-                  {availableOrganizations.map((org) => (
+                  <option value="">Select an organization with active contract...</option>
+                  {contractBasedOrganizations.map((org) => (
                     <option key={org.org_id} value={org.org_id}>
-                      {org.org_name} ({org.org_id})
+                      {org.org_name} ({org.org_id}) - {org.allowed_resources.length} resources available
                     </option>
                   ))}
                 </select>
+                {contractBasedOrganizations.length === 0 && (
+                  <div style={{ color: '#d97706', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+                    No organizations with active contracts found. Please create contracts first.
+                  </div>
+                )}
               </div>
 
               <div style={{ marginBottom: '1.5rem' }}>
@@ -924,8 +1582,20 @@ export default function OrgDashboard() {
 
               <div style={{ marginBottom: '1.5rem' }}>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
-                  Requested Resources *
+                  Requested Resources * (Contract Restricted)
                 </label>
+                {selectedOrgContractData && (
+                  <div style={{ 
+                    background: '#f0f9ff', 
+                    padding: '0.75rem', 
+                    borderRadius: '8px', 
+                    marginBottom: '1rem',
+                    fontSize: '0.875rem',
+                    color: '#1e40af'
+                  }}>
+                    <strong>Contract with {selectedOrgContractData.org_name}:</strong> You can only request resources that are allowed by your active contract.
+                  </div>
+                )}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                   {availableResources.map((resource) => (
                     <button
@@ -953,7 +1623,12 @@ export default function OrgDashboard() {
                     </button>
                   ))}
                 </div>
-                {requestForm.requested_resources.length === 0 && (
+                {availableResources.length === 0 && selectedOrgId && (
+                  <div style={{ color: '#d97706', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+                    No resources available for this organization in the active contract.
+                  </div>
+                )}
+                {requestForm.requested_resources.length === 0 && availableResources.length > 0 && (
                   <div style={{ color: '#dc2626', fontSize: '0.75rem', marginTop: '0.5rem' }}>
                     Please select at least one resource
                   </div>
@@ -962,10 +1637,22 @@ export default function OrgDashboard() {
 
               <div style={{ marginBottom: '1.5rem' }}>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
-                  Purpose *
+                  Purpose * (Contract Restricted)
                 </label>
+                {selectedOrgContractData && requestForm.requested_resources.length > 0 && (
+                  <div style={{ 
+                    background: '#f0f9ff', 
+                    padding: '0.75rem', 
+                    borderRadius: '8px', 
+                    marginBottom: '1rem',
+                    fontSize: '0.875rem',
+                    color: '#1e40af'
+                  }}>
+                    <strong>Available purposes for selected resources:</strong> Only purposes allowed by the contract for your selected resources are available.
+                  </div>
+                )}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  {['KYC', 'Credit Assessment', 'Fraud Prevention', 'Compliance', 'Service Provision', 'Analytics'].map((purpose) => (
+                  {getAvailablePurposesForSelectedResources().map((purpose) => (
                     <button
                       key={purpose}
                       type="button"
@@ -991,7 +1678,12 @@ export default function OrgDashboard() {
                     </button>
                   ))}
                 </div>
-                {requestForm.purpose.length === 0 && (
+                {getAvailablePurposesForSelectedResources().length === 0 && requestForm.requested_resources.length > 0 && (
+                  <div style={{ color: '#d97706', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+                    No purposes available for the selected resources in the contract.
+                  </div>
+                )}
+                {requestForm.purpose.length === 0 && getAvailablePurposesForSelectedResources().length > 0 && (
                   <div style={{ color: '#dc2626', fontSize: '0.75rem', marginTop: '0.5rem' }}>
                     Please select at least one purpose
                   </div>
@@ -1081,6 +1773,294 @@ export default function OrgDashboard() {
                   }}
                 >
                   {createRequestLoading ? 'Creating...' : 'Create Request'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Create Contract Modal */}
+      {showCreateContractModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '2rem',
+            maxWidth: '600px',
+            width: '90%',
+            maxHeight: '90vh',
+            overflow: 'auto'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '1.5rem'
+            }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>Create Inter-Organization Contract</h2>
+              <button
+                onClick={handleCloseCreateContractModal}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '0.5rem',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {createContractError && (
+              <div style={{
+                background: '#fee2e2',
+                color: '#dc2626',
+                padding: '0.75rem',
+                borderRadius: '8px',
+                marginBottom: '1rem',
+                fontSize: '0.875rem'
+              }}>
+                {createContractError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateContract}>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Target Organization *
+                </label>
+                <select
+                  value={contractForm.target_org_id}
+                  onChange={(e) => handleContractFormChange('target_org_id', e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  <option value="">Select an organization...</option>
+                  {allOrganizations.map((org) => (
+                    <option key={org.org_id} value={org.org_id}>
+                      {org.org_name} ({org.org_id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Add Resources to Contract
+                </label>
+                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                  <select
+                    value={contractResourceForm.resource_name}
+                    onChange={(e) => handleContractResourceFormChange('resource_name', e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '0.75rem',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      fontSize: '0.875rem'
+                    }}
+                  >
+                    <option value="">Select a resource...</option>
+                    {availableContractResources.map((resource) => (
+                      <option key={resource} value={resource}>
+                        {resource.charAt(0).toUpperCase() + resource.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={contractResourceForm.retention_window}
+                    onChange={(e) => handleContractResourceFormChange('retention_window', e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '0.75rem',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      fontSize: '0.875rem'
+                    }}
+                  >
+                    <option value="7 days">7 days</option>
+                    <option value="15 days">15 days</option>
+                    <option value="30 days">30 days</option>
+                    <option value="60 days">60 days</option>
+                    <option value="90 days">90 days</option>
+                    <option value="1 year">1 year</option>
+                    <option value="2 years">2 years</option>
+                    <option value="5 years">5 years</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  {availablePurposes.map((purpose) => (
+                    <button
+                      key={purpose}
+                      type="button"
+                      onClick={() => handleContractResourcePurposeToggle(purpose)}
+                      style={{
+                        padding: '0.5rem 1rem',
+                        border: contractResourceForm.purpose.includes(purpose) 
+                          ? '2px solid #2563eb' 
+                          : '2px solid #e5e7eb',
+                        borderRadius: '20px',
+                        background: contractResourceForm.purpose.includes(purpose) 
+                          ? '#dbeafe' 
+                          : 'white',
+                        color: contractResourceForm.purpose.includes(purpose) 
+                          ? '#1e40af' 
+                          : '#374151',
+                        cursor: 'pointer',
+                        fontSize: '0.875rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      {purpose}
+                    </button>
+                  ))}
+                </div>
+                {contractResourceForm.resource_name === "" || contractResourceForm.purpose.length === 0 ? (
+                  <div style={{ color: '#dc2626', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+                    Please select a resource and at least one purpose
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleAddContractResource}
+                    style={{
+                      marginTop: '1rem',
+                      padding: '0.75rem 1.5rem',
+                      border: '1px solid #2563eb',
+                      borderRadius: '8px',
+                      background: '#2563eb',
+                      color: 'white',
+                      cursor: 'pointer',
+                      fontSize: '0.875rem',
+                      fontWeight: '500'
+                    }}
+                  >
+                    Add Resource
+                  </button>
+                )}
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Contract Resources
+                </label>
+                {contractForm.resources_allowed.length === 0 ? (
+                  <div style={{ color: '#d97706', fontSize: '0.875rem' }}>No resources added to this contract yet.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {contractForm.resources_allowed.map((resource, index) => (
+                      <div key={index} style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        background: '#f9fafb',
+                        padding: '0.75rem',
+                        borderRadius: '8px',
+                        border: '1px solid #e5e7eb'
+                      }}>
+                        <span style={{ fontWeight: '500', color: '#111827' }}>{resource.resource_name}</span>
+                        <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>({resource.retention_window})</span>
+                        <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>({resource.purpose.join(', ')})</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveContractResource(index)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#dc2626',
+                            cursor: 'pointer',
+                            fontSize: '1rem'
+                          }}
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Approval Message (Optional)
+                </label>
+                <textarea
+                  value={contractForm.approval_message}
+                  onChange={(e) => handleContractFormChange('approval_message', e.target.value)}
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Add a message for the target organization to approve or reject the contract."
+                />
+              </div>
+
+              <div style={{
+                display: 'flex',
+                gap: '1rem',
+                justifyContent: 'flex-end'
+              }}>
+                <button
+                  type="button"
+                  onClick={handleCloseCreateContractModal}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    background: 'white',
+                    color: '#374151',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={createContractLoading || contractForm.target_org_id === "" || contractForm.resources_allowed.length === 0}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: 'none',
+                    borderRadius: '8px',
+                    background: createContractLoading || contractForm.target_org_id === "" || contractForm.resources_allowed.length === 0 
+                      ? '#9ca3af' 
+                      : '#2563eb',
+                    color: 'white',
+                    cursor: createContractLoading || contractForm.target_org_id === "" || contractForm.resources_allowed.length === 0 
+                      ? 'not-allowed' 
+                      : 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  {createContractLoading ? 'Creating...' : 'Create Contract'}
                 </button>
               </div>
             </form>

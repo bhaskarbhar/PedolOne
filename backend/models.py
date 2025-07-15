@@ -199,6 +199,14 @@ class RespondToRequest(BaseModel):
     response_message: Optional[str] = None
 
 # --- Inter-Organization Contract Models ---
+class ContractResource(BaseModel):
+    resource_name: str
+    purpose: List[str]
+    retention_window: str
+    created_at: datetime
+    ends_at: datetime
+    signature: str
+
 class InterOrgContract(BaseModel):
     id: Optional[ObjectId] = Field(default=None, alias="_id")
     contract_id: str
@@ -206,15 +214,19 @@ class InterOrgContract(BaseModel):
     source_org_name: str
     target_org_id: str
     target_org_name: str
-    contract_type: str = "data_sharing"  # "data_sharing", "service_provider", etc.
-    allowed_resources: List[str]
-    purposes: List[str]
-    retention_window: str
-    data_flow_direction: str = "bidirectional"  # "unidirectional", "bidirectional"
     created_at: datetime
-    expires_at: datetime
-    status: str = "active"  # "active", "expired", "terminated"
-    signature: str
+    ends_at: datetime
+    resources_allowed: List[ContractResource]
+    status: str = "active"  # "active", "expired", "terminated", "pending_approval", "rejected"
+    # Approval workflow fields
+    approval_status: str = "pending"  # "pending", "approved", "rejected"
+    approval_message: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    approved_by: Optional[int] = None  # User ID who approved
+    # Contract update fields
+    is_update: bool = False
+    original_contract_id: Optional[str] = None  # For contract updates
+    update_reason: Optional[str] = None
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -224,11 +236,18 @@ class InterOrgContract(BaseModel):
 
 class CreateInterOrgContract(BaseModel):
     target_org_id: str
-    contract_type: str = "data_sharing"
-    allowed_resources: List[str]
-    purposes: List[str]
-    retention_window: str = "30 days"
-    data_flow_direction: str = "bidirectional"
+    resources_allowed: List[ContractResource]
+    approval_message: Optional[str] = None
+
+class UpdateInterOrgContract(BaseModel):
+    contract_id: str
+    resources_allowed: Optional[List[ContractResource]] = None
+    update_reason: str
+
+class RespondToContract(BaseModel):
+    contract_id: str
+    status: str  # "approved" or "rejected"
+    response_message: Optional[str] = None
 
 # --- Organization User Management Models ---
 class OrgUserSummary(BaseModel):
