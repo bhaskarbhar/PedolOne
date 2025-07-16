@@ -145,7 +145,7 @@ const About = () => {
               <div className="w-32 h-32 bg-gray-300 rounded-full mx-auto mb-4 flex items-center justify-center">
                 <Users className="h-12 w-12 text-gray-600" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">Rahul Sharma</h3>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Bhaskar Bhar</h3>
               <p className="text-blue-600 font-medium mb-2">CEO & Co-Founder</p>
               <p className="text-gray-600 text-sm">
                 Former cybersecurity expert with 15+ years in fintech. 
@@ -157,7 +157,7 @@ const About = () => {
               <div className="w-32 h-32 bg-gray-300 rounded-full mx-auto mb-4 flex items-center justify-center">
                 <Users className="h-12 w-12 text-gray-600" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">Priya Patel</h3>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Aryan Sakaria</h3>
               <p className="text-blue-600 font-medium mb-2">CTO & Co-Founder</p>
               <p className="text-gray-600 text-sm">
                 Technology leader with expertise in distributed systems and 
@@ -169,7 +169,7 @@ const About = () => {
               <div className="w-32 h-32 bg-gray-300 rounded-full mx-auto mb-4 flex items-center justify-center">
                 <Users className="h-12 w-12 text-gray-600" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">Arjun Kumar</h3>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Deeksha Singh</h3>
               <p className="text-blue-600 font-medium mb-2">Head of Product</p>
               <p className="text-gray-600 text-sm">
                 Product strategist with deep understanding of regulatory 
