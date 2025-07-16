@@ -181,7 +181,6 @@ const UserDashboard = () => {
     const ws = new WebSocket(`ws://localhost:8000/ws/user/${user.userid}?token=${token}`);
 
     ws.onopen = () => {
-      console.log('WebSocket connected');
     };
 
     ws.onmessage = (event) => {
@@ -240,11 +239,9 @@ const UserDashboard = () => {
     };
 
     ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
     };
 
     ws.onclose = () => {
-      console.log('WebSocket disconnected');
     };
 
     setSocket(ws);
@@ -307,7 +304,6 @@ const UserDashboard = () => {
         setDataRequests(requestsResponse.data || []);
       }
     } catch (err) {
-      console.error('Error sending data request:', err);
     }
   };
 
@@ -320,7 +316,6 @@ const UserDashboard = () => {
       }, getAuthConfig());
       fetchUserData(); // Refresh data
     } catch (err) {
-      console.error('Error responding to request:', err);
     }
   };
 
@@ -333,7 +328,6 @@ const UserDashboard = () => {
       });
       setShowUserDetailModal(true);
     } catch (err) {
-      console.error('Error fetching user details:', err);
     }
   };
 

@@ -69,7 +69,6 @@ consentForm.addEventListener('submit', async (e) => {
             showNotification(data.detail || 'Failed to process consent', 'error');
         }
     } catch (error) {
-        console.error('Error:', error);
         showNotification('Network error. Please try again.', 'error');
     } finally {
         submitBtn.disabled = false;
@@ -115,7 +114,6 @@ document.getElementById('otpForm').addEventListener('submit', async (e) => {
             showNotification(data.detail || 'Invalid verification code', 'error');
         }
     } catch (error) {
-        console.error('Error:', error);
         showNotification('Network error. Please try again.', 'error');
     } finally {
         verifyBtn.disabled = false;
@@ -153,7 +151,6 @@ resendBtn.addEventListener('click', async () => {
             showNotification(data.detail || 'Failed to resend code', 'error');
         }
     } catch (error) {
-        console.error('Error:', error);
         showNotification('Network error. Please try again.', 'error');
     } finally {
         resendBtn.disabled = false;
