@@ -1,6 +1,9 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Dict, List
-import json
+from datetime import datetime
+from pymongo import MongoClient
+from jwt_utils import verify_token
+import jwt
 
 router = APIRouter()
 
@@ -33,8 +36,31 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# MongoDB client and collection
+client = MongoClient("mongodb://localhost:27017/")
+db = client["PedolOne"]
+logs_collection = db["logs"]
+
 @router.websocket("/ws/user/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
+    # Extract token from query params
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4401, reason="Missing token")
+        return
+    credentials_exception = Exception("Could not validate credentials")
+    try:
+        token_data = verify_token(token, credentials_exception)
+    except jwt.PyJWTError:
+        await websocket.close(code=4401, reason="Invalid token")
+        return
+    except Exception:
+        await websocket.close(code=4401, reason="Invalid token")
+        return
+    # Check user_id matches token
+    if str(token_data.user_id) != str(user_id):
+        await websocket.close(code=4403, reason="User ID does not match token")
+        return
     await manager.connect(websocket, user_id)
     try:
         while True:
@@ -50,4 +76,27 @@ async def send_user_update(user_id: str, update_type: str, data: dict):
         "type": update_type,
         **data
     }
-    await manager.broadcast_to_user(user_id, message) 
+    await manager.broadcast_to_user(user_id, message)
+
+@router.get("/audit/org-dashboard/{org_id}")
+async def get_organization_dashboard_audit_logs(org_id: str):
+    """Get all audit logs for an organization for the dashboard (matches by fintech_id only)"""
+    logs = list(logs_collection.find({"fintech_id": org_id}))
+    logs.sort(key=lambda x: x.get("created_at", datetime.min), reverse=True)
+    formatted_logs = []
+    for log in logs:
+        formatted_logs.append({
+            "user_id": log.get("user_id"),
+            "fintech_name": log.get("fintech_name"),
+            "fintech_id": log.get("fintech_id"),
+            "resource_name": log.get("resource_name"),
+            "purpose": log.get("purpose"),
+            "log_type": log.get("log_type"),
+            "ip_address": log.get("ip_address"),
+            "data_source": log.get("data_source"),
+            "source_org_id": log.get("source_org_id"),
+            "target_org_id": log.get("target_org_id"),
+            "created_at": log.get("created_at").isoformat() if log.get("created_at") else None,
+            "_id": str(log.get("_id")) if log.get("_id") else None
+        })
+    return formatted_logs 

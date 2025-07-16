@@ -6,7 +6,7 @@ from fastapi.encoders import jsonable_encoder
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from models import PIIInput, UserInputPII
-from helpers import users_collection, user_pii_collection,decrypt_pii
+from helpers import users_collection, user_pii_collection, decrypt_pii
 from routers.pii_tokenizer import (
     tokenize_aadhaar, tokenize_pan, tokenize_account, tokenize_ifsc,
     tokenize_creditcard, tokenize_debitcard, tokenize_gst,
@@ -20,14 +20,14 @@ from pydantic import BaseModel, EmailStr
 
 load_dotenv()
 
-router = APIRouter(prefix="/stockbroker", tags=["StockBroker Consent"])
+router = APIRouter(prefix="/bank", tags=["Bank Consent"])
 
 MONGO_URL = os.getenv("MONGO_URL")
 client = MongoClient(MONGO_URL)
 db = client.get_database("PedolOne")
 policies_collection = db.get_collection("policy")
 
-with open("routers/contract_stockbroker.json") as f:
+with open("routers/contract_bankabc.json") as f:
     contract = json.load(f)
 
 TOKENIZER_MAP = {
@@ -47,22 +47,23 @@ TOKENIZER_MAP = {
 # In-memory session store (for demo; use Redis/DB in prod)
 sessions = {}
 
-class StockbrokerConsentRequest(BaseModel):
+class BankConsentRequest(BaseModel):
     email: EmailStr
     aadhaar: str = None
     pan: str = None
+    account: str = None
     consent: bool
 
-class StockbrokerVerifyOtpRequest(BaseModel):
+class BankVerifyOtpRequest(BaseModel):
     session_id: str
     otp: str
 
-class StockbrokerResendOtpRequest(BaseModel):
+class BankResendOtpRequest(BaseModel):
     session_id: str
     email: EmailStr
 
 @router.post("/consent")
-def stockbroker_consent(data: StockbrokerConsentRequest, background_tasks: BackgroundTasks):
+def bank_consent(data: BankConsentRequest, background_tasks: BackgroundTasks):
     if not data.consent:
         raise HTTPException(status_code=400, detail="Consent not given")
     
@@ -79,6 +80,8 @@ def stockbroker_consent(data: StockbrokerConsentRequest, background_tasks: Backg
         pii_inputs.append(("aadhaar", data.aadhaar))
     if data.pan:
         pii_inputs.append(("pan", data.pan))
+    if data.account:
+        pii_inputs.append(("account", data.account))
     if not pii_inputs:
         raise HTTPException(status_code=400, detail="No PII provided")
     
@@ -119,7 +122,7 @@ def stockbroker_consent(data: StockbrokerConsentRequest, background_tasks: Backg
     return {"session_id": session_id, "message": "OTP sent to email"}
 
 @router.post("/verify-otp")
-async def stockbroker_verify_otp(data: StockbrokerVerifyOtpRequest, request: Request):
+async def bank_verify_otp(data: BankVerifyOtpRequest, request: Request):
     session = sessions.get(data.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found or expired")
@@ -170,7 +173,7 @@ async def stockbroker_verify_otp(data: StockbrokerVerifyOtpRequest, request: Req
     })
 
 @router.post("/resend-otp")
-def stockbroker_resend_otp(data: StockbrokerResendOtpRequest, background_tasks: BackgroundTasks):
+def bank_resend_otp(data: BankResendOtpRequest, background_tasks: BackgroundTasks):
     session = sessions.get(data.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found or expired")

@@ -1,0 +1,16 @@
+{
+  "name": "bankabc-demo",
+  "version": "1.0.0",
+  "description": "BankABC Demo Application for PedolOne Integration",
+  "main": "index.html",
+  "scripts": {
+    "dev": "npx http-server -p 3001 -o",
+    "start": "npx http-server -p 3001"
+  },
+  "keywords": ["banking", "pedolone", "demo", "pii"],
+  "author": "PedolOne",
+  "license": "MIT",
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+} 

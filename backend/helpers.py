@@ -18,6 +18,11 @@ db = client.PedolOne
 users_collection = db.users
 user_pii_collection = db.user_pii
 
+# Organization collections
+organizations_collection = db.organizations
+policies_collection = db.policy
+logs_collection = db.logs
+
 FERNET_KEY = os.getenv("FERNET_KEY")
 if not FERNET_KEY:
     raise Exception("FERNET_KEY not set in environment variables")
@@ -104,3 +109,61 @@ def encrypt_pii(plain: str) -> str:
 
 def decrypt_pii(token: str) -> str:
     return fernet.decrypt(token.encode()).decode()
+
+def seed_organizations():
+    """Seed the database with 3 sample organizations"""
+    sample_organizations = [
+        {
+            "org_id": "stockbrokerx_001",
+            "org_name": "StockBrokerX",
+            "contract_id": "contract_stockbroker_2025",
+            "created_at": datetime.utcnow()
+        },
+        {
+            "org_id": "bankabc_001",
+            "org_name": "BankABC", 
+            "contract_id": "contract_bankabc_2025",
+            "created_at": datetime.utcnow()
+        },
+        {
+            "org_id": "insurancecorp_001",
+            "org_name": "InsuranceCorp",
+            "contract_id": "contract_insurance_2025", 
+            "created_at": datetime.utcnow()
+        }
+    ]
+    
+    for org in sample_organizations:
+        # Check if organization already exists
+        existing = organizations_collection.find_one({"org_id": org["org_id"]})
+        if not existing:
+            organizations_collection.insert_one(org)
+            print(f"Seeded organization: {org['org_name']}")
+
+def get_organization_by_id(org_id: str):
+    """Get organization by ID"""
+    return organizations_collection.find_one({"org_id": org_id})
+
+def get_organization_clients(org_id: str):
+    """Get all users who have shared data with this organization (through policies)"""
+    # Get all policies where this org is the target
+    policies = list(policies_collection.find({"target_org_id": org_id}))
+    
+    # Get unique user IDs from these policies
+    user_ids = list(set([policy["user_id"] for policy in policies]))
+    
+    # Get user details
+    clients = []
+    for user_id in user_ids:
+        user = users_collection.find_one({"userid": user_id})
+        if user:
+            clients.append({
+                "userid": user["userid"],
+                "username": user["username"],
+                "full_name": user["full_name"],
+                "email": user["email"],
+                "phone_number": user["phone_number"],
+                "created_at": user["created_at"]
+            })
+    
+    return clients
