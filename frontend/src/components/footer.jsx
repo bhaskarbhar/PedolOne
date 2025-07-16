@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 
 export default function Footer() {
   return (
@@ -8,15 +9,18 @@ export default function Footer() {
           &copy; 2025 PedolOne Inc. All rights reserved.
         </div>
         <div className="flex flex-col sm:flex-row sm:justify-center space-y-2 sm:space-y-0 sm:space-x-6">
-          <a href="#privacy" className="text-gray-600 hover:text-blue-700 text-sm sm:text-base transition-colors duration-200">
+          <Link to="/privacy" className="text-gray-600 hover:text-blue-700 text-sm sm:text-base transition-colors duration-200">
             Privacy Policy
-          </a>
-          <a href="#terms" className="text-gray-600 hover:text-blue-700 text-sm sm:text-base transition-colors duration-200">
+          </Link>
+          <Link to="/terms" className="text-gray-600 hover:text-blue-700 text-sm sm:text-base transition-colors duration-200">
             Terms of Service
-          </a>
-          <a href="#security" className="text-gray-600 hover:text-blue-700 text-sm sm:text-base transition-colors duration-200">
+          </Link>
+          <Link to="/security" className="text-gray-600 hover:text-blue-700 text-sm sm:text-base transition-colors duration-200">
             Security
-          </a>
+          </Link>
+          <Link to="/policy" className="text-gray-600 hover:text-blue-700 text-sm sm:text-base transition-colors duration-200">
+            Data Policy
+          </Link>
         </div>
       </div>
     </footer>
