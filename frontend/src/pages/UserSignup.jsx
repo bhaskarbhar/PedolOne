@@ -18,6 +18,31 @@ export default function UserSignup() {
 
   const [errors, setErrors] = useState({});
   const [step, setStep] = useState('signup'); // 'signup' | 'success'
+  const [passwordStrength, setPasswordStrength] = useState({ label: '', score: 0, color: '#d1d5db' });
+
+  // Password strength calculation function
+  function getPasswordStrength(password) {
+    let score = 0;
+    if (password.length >= 8) score++;
+    if (/[A-Z]/.test(password)) score++;
+    if (/[a-z]/.test(password)) score++;
+    if (/\d/.test(password)) score++;
+    if (/[!@#$%^&*(),.?":{}|<>]/.test(password)) score++;
+
+    let label = 'Weak';
+    let color = '#ef4444'; // red
+    if (score === 5) {
+      label = 'Very Strong';
+      color = '#2563eb'; // blue (or green if you prefer)
+    } else if (score >= 4) {
+      label = 'Strong';
+      color = '#10b981'; // green
+    } else if (score === 3) {
+      label = 'Medium';
+      color = '#f59e42'; // orange
+    }
+    return { label, score, color };
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -63,7 +88,12 @@ export default function UserSignup() {
       ...formData,
       [e.target.name]: e.target.value
     });
-    
+
+    // Password strength update
+    if (e.target.name === 'password') {
+      setPasswordStrength(getPasswordStrength(e.target.value));
+    }
+
     // Clear error when user starts typing
     if (errors[e.target.name]) {
       setErrors({
@@ -439,6 +469,51 @@ export default function UserSignup() {
                 color: '#9ca3af'
               }} />
             </div>
+            {/* Password Policy Info Box */}
+            <div style={{
+              background: '#f3f4f6',
+              border: '1px solid #d1d5db',
+              borderRadius: '6px',
+              padding: '0.75rem 1rem',
+              marginTop: '0.5rem',
+              marginBottom: '0.5rem',
+              fontSize: '0.95rem',
+              color: '#374151'
+            }}>
+              <strong>Password must contain:</strong>
+              <ul style={{ margin: '0.5rem 0 0 1.2rem', padding: 0 }}>
+                <li>At least 8 characters</li>
+                <li>At least one uppercase letter (A-Z)</li>
+                <li>At least one lowercase letter (a-z)</li>
+                <li>At least one digit (0-9)</li>
+                <li>At least one special character (e.g., !@#$%^&*)</li>
+              </ul>
+            </div>
+            {/* Password Strength Bar */}
+            {formData.password && (
+              <div style={{ marginTop: '0.5rem' }}>
+                <div style={{
+                  height: '8px',
+                  width: '100%',
+                  background: '#e5e7eb',
+                  borderRadius: '4px',
+                  overflow: 'hidden',
+                  marginBottom: '0.25rem'
+                }}>
+                  <div style={{
+                    width: `${(passwordStrength.score / 5) * 100}%`,
+                    height: '100%',
+                    background: passwordStrength.color,
+                    transition: 'width 0.3s'
+                  }} />
+                </div>
+                <span style={{
+                  fontSize: '0.85rem',
+                  color: passwordStrength.color,
+                  fontWeight: '500'
+                }}>{passwordStrength.label}</span>
+              </div>
+            )}
             {errors.password && (
               <p style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: '0.25rem' }}>
                 {errors.password}

@@ -20,7 +20,7 @@ from models import (
     UserPIIEntry, UserPIIMap, PIIInput
 )
 from jwt_utils import create_access_token, get_current_user, get_token_expiry_time
-from helpers import users_collection, user_pii_collection, encrypt_pii, decrypt_pii
+from helpers import users_collection, user_pii_collection, encrypt_pii, decrypt_pii, validate_password_strength
 from routers.pii_tokenizer import tokenize_aadhaar, tokenize_pan
 
 # Load environment variables
@@ -219,6 +219,11 @@ async def register_user(user_data: UserRegistration):
             raise HTTPException(status_code=400, detail="User with this email already exists")
         elif existing_user.get("username") == user_data.username:
             raise HTTPException(status_code=400, detail="Username already taken")
+    
+    # Password strength validation
+    is_strong, message = validate_password_strength(user_data.password)
+    if not is_strong:
+        raise HTTPException(status_code=400, detail=message)
     
     # Hash password
     password_hash = hash_password(user_data.password)
