@@ -1,12 +1,11 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Body
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import APIRouter, HTTPException,Depends
+from fastapi.security import HTTPBearer
 from datetime import datetime, timedelta
 import bcrypt
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
-from typing import Optional
 import asyncio
 from dotenv import load_dotenv
 import secrets
@@ -16,12 +15,11 @@ from pydantic import BaseModel, EmailStr
 
 from models import (
     UserRegistration, UserLogin, OTPVerification, LoginVerification, 
-    User, Token, TokenData, UserResponse, LoginResponse, RegisterResponse,
-    UserPIIEntry, UserPIIMap, PIIInput
+    Token, TokenData, UserResponse, LoginResponse, RegisterResponse,
+    PIIInput
 )
 from jwt_utils import create_access_token, get_current_user, get_token_expiry_time
 from helpers import users_collection, user_pii_collection, encrypt_pii, decrypt_pii, validate_password_strength
-from routers.pii_tokenizer import tokenize_aadhaar, tokenize_pan
 
 # Load environment variables
 load_dotenv()

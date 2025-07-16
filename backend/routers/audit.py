@@ -1,8 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends
-from datetime import datetime
-from typing import List
+from fastapi import APIRouter
 from helpers import logs_collection
-from jwt_utils import get_current_user, TokenData
 
 router = APIRouter(prefix="/audit", tags=["Audit Logs"])
 

@@ -1,12 +1,10 @@
-import os
 import json
 from fastapi import APIRouter, HTTPException, Request, Depends
 from datetime import datetime
 from fastapi.encoders import jsonable_encoder
-from typing import List, Optional
+from typing import List
 from pydantic import BaseModel
 
-from models import User
 from helpers import (
     organizations_collection, users_collection, user_pii_collection, 
     policies_collection, logs_collection, get_organization_by_id,

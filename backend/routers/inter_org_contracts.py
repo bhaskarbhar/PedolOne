@@ -1,19 +1,17 @@
 import os
-import json
 import uuid
 import hashlib
 from fastapi import APIRouter, HTTPException, Depends, Request
 from datetime import datetime, timedelta
-from fastapi.encoders import jsonable_encoder
 from pymongo import MongoClient
 from dotenv import load_dotenv
-from typing import List, Optional
+from typing import List
 
 from models import (
     InterOrgContract, CreateInterOrgContract, UpdateInterOrgContract, RespondToContract,
     ContractResource
 )
-from helpers import users_collection, policies_collection, logs_collection
+from helpers import users_collection,logs_collection
 from jwt_utils import get_current_user, TokenData
 from routers.websocket import send_user_update
 
