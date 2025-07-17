@@ -795,4 +795,8 @@ async def update_password(
     except Exception as e:
         print(f"Error updating password: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") 
+
         raise HTTPException(status_code=404, detail="User not found or organization ID not updated.") 
+
+        raise HTTPException(status_code=404, detail="User not found or organization ID not updated.") 
+
