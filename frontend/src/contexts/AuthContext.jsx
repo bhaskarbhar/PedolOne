@@ -97,7 +97,7 @@ const authReducer = (state, action) => {
 const AuthContext = createContext();
 
 // API base URL - adjust this to match your backend
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'https://pedolone.onrender.com' || 'http://localhost:8000';
 
 // AuthProvider component
 export const AuthProvider = ({ children }) => {
