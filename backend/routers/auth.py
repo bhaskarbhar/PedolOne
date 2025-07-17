@@ -643,7 +643,6 @@ async def add_user_pii(user_id: int, resource: str, pii_value: str):
         {"$push": {"pii": entry}},
         upsert=False
     )
-    )
     
     # If no existing entry was found, add new one
     user_pii_collection.update_one(
