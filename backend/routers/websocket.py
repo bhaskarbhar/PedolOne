@@ -4,9 +4,11 @@ from datetime import datetime
 from pymongo import MongoClient
 from jwt_utils import verify_token
 import jwt
-
+from dotenv import load_dotenv
+import os
+load_dotenv()
 router = APIRouter()
-
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017/")
 # Store active WebSocket connections
 class ConnectionManager:
     def __init__(self):
@@ -37,7 +39,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # MongoDB client and collection
-client = MongoClient("mongodb://localhost:27017/")
+client = MongoClient(MONGO_URL)
 db = client["PedolOne"]
 logs_collection = db["logs"]
 

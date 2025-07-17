@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Shield, Users, FileText, Eye, AlertCircle, 
-  Send, CheckCircle, XCircle, Clock, Building2,
-  UserCheck, UserX, Mail, Calendar, Target
+  Send, CheckCircle, XCircle,
+  UserCheck
 } from 'lucide-react';
 import MaskedDataCard from '../components/MaskedDataCard';
 import ConsentCard from '../components/ConsentCard';
@@ -43,7 +43,6 @@ const UserDashboard = () => {
   const [showUserDetailModal, setShowUserDetailModal] = useState(false);
   
   const [socket, setSocket] = useState(null);
-
   // Helper function to mask PII data
   const maskPII = (type, value) => {
     if (!value) return 'XXXX';
@@ -177,8 +176,10 @@ const UserDashboard = () => {
   // Initialize WebSocket connection
   useEffect(() => {
     if (!user?.userid || !token) return;
-
-    const ws = new WebSocket(`ws://localhost:8000/ws/user/${user.userid}?token=${token}`);
+    const BACKEND_URL = "https://pedolone.onrender.com" || "http://localhost:8000";
+    const wsProtocol = BACKEND_URL.startsWith('https') ? 'wss' : 'ws';
+    const wsUrl = `${wsProtocol}://${BACKEND_URL.replace(/^https?:\/\//, '')}/ws/user/${user.userid}?token=${token}`;
+    const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
     };
