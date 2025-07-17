@@ -1,5 +1,5 @@
 // StockBroker Demo Application
-const API_BASE_URL = '/api';
+const API_BASE_URL = 'https://pedolone.onrender.com' || 'http://localhost:8000';
 
 // DOM Elements
 const consentForm = document.getElementById('consentForm');
