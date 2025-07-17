@@ -643,7 +643,14 @@ async def add_user_pii(user_id: int, resource: str, pii_value: str):
         {"$push": {"pii": entry}},
         upsert=False
     )
+    )
     
+    # If no existing entry was found, add new one
+    user_pii_collection.update_one(
+        {"user_id": user_id, "pii.resource": {"$ne": resource}},
+        {"$push": {"pii": entry}},
+        upsert=False
+    )
     return {"status": "success", "resource": resource, "token": token}
 
 @router.get("/user-pii/{user_id}")
@@ -788,3 +795,4 @@ async def update_password(
     except Exception as e:
         print(f"Error updating password: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") 
+        raise HTTPException(status_code=404, detail="User not found or organization ID not updated.") 
