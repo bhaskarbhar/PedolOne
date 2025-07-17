@@ -11,8 +11,8 @@ const createAxiosInstance = () => {
   const token = localStorage.getItem('token');
   const isProd = import.meta.env.PROD;
   return axios.create({
+    baseURL: isProd ? 'https://pedolone.onrender.com' : 'http://localhost:8000',
     headers: {
-      baseURL: isProd ? 'https://pedolone.onrender.com' : 'http://localhost:8000',
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json'
     }
