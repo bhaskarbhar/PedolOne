@@ -139,7 +139,7 @@ const UserDashboard = () => {
       setActiveConsents(consents);
 
       // Fetch access logs
-      const logsResponse = await axios.get(`${BACKEND_URL}policy/user/${user.userid}/logs`, getAuthConfig());
+      const logsResponse = await axios.get(`${BACKEND_URL}/policy/user/${user.userid}/logs`, getAuthConfig());
       const logsArr = Array.isArray(logsResponse.data) ? logsResponse.data : [];
       let filteredLogs = logsArr;
       if (user?.user_type === 'organization' && user.organization_id) {
