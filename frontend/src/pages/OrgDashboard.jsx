@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  Building2, Users, FileText, Shield, Database, Activity, Calendar, Settings, TrendingUp, AlertTriangle, CheckCircle, Clock, Eye, Download, Plus, X
+  Building2, Users, FileText, Shield, Database, Activity, Calendar, Settings, TrendingUp, AlertTriangle, CheckCircle, Clock, Eye, Download, Plus, X, Edit, Trash2, History, Search
 } from 'lucide-react';
 import axios from 'axios';
 import AuditLogTable from '../components/AuditLogTable';
@@ -83,9 +83,49 @@ export default function OrgDashboard() {
   const [createContractError, setCreateContractError] = useState("");
   const [contractForm, setContractForm] = useState({
     target_org_id: "",
+    contract_name: "",
+    contract_type: "data_sharing",
+    contract_description: "",
     resources_allowed: [],
     approval_message: ""
   });
+
+  // User management state
+  const [userSearchTerm, setUserSearchTerm] = useState("");
+  const [userFilterStatus, setUserFilterStatus] = useState("all");
+  const [userFilterResource, setUserFilterResource] = useState("all");
+  const [showUserPIIModal, setShowUserPIIModal] = useState(false);
+  const [selectedUserPII, setSelectedUserPII] = useState(null);
+  const [userPIILoading, setUserPIILoading] = useState(false);
+  
+  // Contract management state
+  const [showEditContractModal, setShowEditContractModal] = useState(false);
+  const [showDeleteContractModal, setShowDeleteContractModal] = useState(false);
+  const [showContractVersionsModal, setShowContractVersionsModal] = useState(false);
+  const [showContractAuditModal, setShowContractAuditModal] = useState(false);
+  const [selectedContract, setSelectedContract] = useState(null);
+  const [contractVersions, setContractVersions] = useState([]);
+  const [contractAuditLogs, setContractAuditLogs] = useState([]);
+  const [contractTypes, setContractTypes] = useState([]);
+  
+  // Contract edit form state
+  const [editContractForm, setEditContractForm] = useState({
+    contract_name: "",
+    contract_description: "",
+    contract_type: "data_sharing",
+    resources_allowed: [],
+    approval_message: ""
+  });
+  
+  // Contract deletion form state
+  const [deleteContractForm, setDeleteContractForm] = useState({
+    deletion_reason: "",
+    approval_message: ""
+  });
+  
+  // Contract action state
+  const [contractActionLoading, setContractActionLoading] = useState(false);
+  const [contractActionError, setContractActionError] = useState("");
   
   // Contract resource form state
   const [contractResourceForm, setContractResourceForm] = useState({
@@ -125,6 +165,33 @@ export default function OrgDashboard() {
   // Add state for contract logs
   const [contractLogs, setContractLogs] = useState([]);
 
+  // Add state for viewing approved data request PII
+  const [showApprovedDataModal, setShowApprovedDataModal] = useState(false);
+  const [approvedData, setApprovedData] = useState(null);
+  const [approvedDataLoading, setApprovedDataLoading] = useState(false);
+  const [approvedDataError, setApprovedDataError] = useState("");
+
+  // Add state for bulk data requests
+  const [showBulkRequestModal, setShowBulkRequestModal] = useState(false);
+  const [bulkRequestLoading, setBulkRequestLoading] = useState(false);
+  const [bulkRequestError, setBulkRequestError] = useState("");
+  const [selectedUsersForBulk, setSelectedUsersForBulk] = useState([]);
+  const [targetOrgUsers, setTargetOrgUsers] = useState([]);
+  const [targetOrgContracts, setTargetOrgContracts] = useState([]);
+  const [bulkRequestForm, setBulkRequestForm] = useState({
+    target_org_id: "",
+    selected_resources: [],
+    selected_purposes: [],
+    retention_window: "30 days",
+    request_message: ""
+  });
+
+  // Add state for bulk data viewing
+  const [showBulkDataModal, setShowBulkDataModal] = useState(false);
+  const [bulkDataLoading, setBulkDataLoading] = useState(false);
+  const [bulkDataError, setBulkDataError] = useState("");
+  const [bulkDataUrl, setBulkDataUrl] = useState("");
+
   // Fetch contract logs when orgIdToUse changes
   useEffect(() => {
     const fetchContractLogs = async () => {
@@ -138,6 +205,11 @@ export default function OrgDashboard() {
     };
     fetchContractLogs();
   }, [orgIdToUse]);
+
+  // Fetch contract types
+  useEffect(() => {
+    fetchContractTypes();
+  }, []);
 
   useEffect(() => {
     // If user is org admin but has no org_id, skip auto-fetch
@@ -170,6 +242,8 @@ export default function OrgDashboard() {
         // Fetch data access requests
         const requestsResponse = await api.get(`/data-requests/org/${orgId}`);
         setDataRequests(requestsResponse.data || []);
+        
+
         
         // Fetch inter-org contracts
         const contractsResponse = await api.get(`/inter-org-contracts/org/${orgId}`);
@@ -335,24 +409,37 @@ export default function OrgDashboard() {
   };
 
   const handleRejectRequest = async (requestId) => {
-    const response_message = prompt('Optional: Add a response message for rejection');
-    
-    try {
-      const api = createAxiosInstance();
-      await api.post('/data-requests/respond', {
-        request_id: requestId,
-        status: 'rejected',
-        response_message
-      });
-      // Refresh data
-      window.location.reload();
-    } catch (err) {
-      console.error('Error rejecting request:', err);
-      alert('Failed to reject request: ' + (err.response?.data?.detail || err.message));
+    if (confirm('Are you sure you want to reject this data request?')) {
+      try {
+        const api = createAxiosInstance();
+        await api.post('/data-requests/respond', {
+          request_id: requestId,
+          response: 'rejected',
+          response_message: 'Request rejected by organization admin'
+        });
+        window.location.reload();
+      } catch (err) {
+        console.error('Error rejecting request:', err);
+        alert('Failed to reject request');
+      }
     }
   };
 
-
+  const handleApproveBulkRequest = async (bulkRequestId) => {
+    if (confirm('Are you sure you want to approve this bulk data request? This will generate an encrypted Excel file with all the requested data.')) {
+      try {
+        const api = createAxiosInstance();
+        const response = await api.post(`/data-requests/approve-bulk-request/${bulkRequestId}`);
+        
+        alert(`Bulk request approved successfully! ${response.data.approved_requests} requests approved. Excel file generated with ${response.data.record_count} records.`);
+        window.location.reload();
+          } catch (err) {
+      console.error('Error approving bulk request:', err);
+      const errorMessage = err.response?.data?.detail || err.response?.data?.message || 'Failed to approve bulk request';
+      alert(typeof errorMessage === 'string' ? errorMessage : 'Failed to approve bulk request');
+    }
+    }
+  };
 
   // Fetch available organizations and resources for data requests
   const fetchAvailableOrganizations = async () => {
@@ -394,6 +481,47 @@ export default function OrgDashboard() {
       setAvailableUsers([]);
     }
   };
+
+  const fetchUserPII = async (userId) => {
+    setUserPIILoading(true);
+    try {
+      const api = createAxiosInstance();
+      const response = await api.get(`/organization/${orgIdToUse}/clients/${userId}/pii`);
+      setSelectedUserPII(response.data);
+      setShowUserPIIModal(true);
+    } catch (err) {
+      console.error('Error fetching user PII:', err);
+      alert('Failed to fetch user PII data');
+    } finally {
+      setUserPIILoading(false);
+    }
+  };
+
+  const handleOpenUserPIIModal = (user) => {
+    fetchUserPII(user.user_id);
+  };
+
+  const handleCloseUserPIIModal = () => {
+    setShowUserPIIModal(false);
+    setSelectedUserPII(null);
+  };
+
+  // Filter and search users
+  const filteredUsers = orgUsers.filter(user => {
+    const matchesSearch = userSearchTerm === "" || 
+      user.username.toLowerCase().includes(userSearchTerm.toLowerCase()) ||
+      user.full_name.toLowerCase().includes(userSearchTerm.toLowerCase()) ||
+      user.email.toLowerCase().includes(userSearchTerm.toLowerCase());
+    
+    const matchesStatus = userFilterStatus === "all" || 
+      (userFilterStatus === "active" && user.active_policies_count > 0) ||
+      (userFilterStatus === "inactive" && user.active_policies_count === 0);
+    
+    const matchesResource = userFilterResource === "all" || 
+      (user.shared_resources && user.shared_resources.includes(userFilterResource));
+    
+    return matchesSearch && matchesStatus && matchesResource;
+  });
 
   const fetchAvailableResources = async () => {
     try {
@@ -441,6 +569,11 @@ export default function OrgDashboard() {
     setCreateRequestError("");
 
     // Validate form data
+    if (!requestForm.target_org_id) {
+      setCreateRequestError("Please select a target organization");
+      setCreateRequestLoading(false);
+      return;
+    }
     if (!requestForm.target_user_email) {
       setCreateRequestError("Please select a target user");
       setCreateRequestLoading(false);
@@ -457,34 +590,6 @@ export default function OrgDashboard() {
       return;
     }
 
-    // Additional contract validation
-    if (!selectedOrgContractData) {
-      setCreateRequestError("No active contract found for the selected organization");
-      setCreateRequestLoading(false);
-      return;
-    }
-
-    // Validate that all requested resources are allowed by contract
-    const unauthorizedResources = requestForm.requested_resources.filter(
-      resource => !selectedOrgContractData.allowed_resources.includes(resource)
-    );
-    if (unauthorizedResources.length > 0) {
-      setCreateRequestError(`The following resources are not allowed by the contract: ${unauthorizedResources.join(', ')}`);
-      setCreateRequestLoading(false);
-      return;
-    }
-
-    // Validate that all requested purposes are allowed for the selected resources
-    const allowedPurposes = getAvailablePurposesForSelectedResources();
-    const unauthorizedPurposes = requestForm.purpose.filter(
-      purpose => !allowedPurposes.includes(purpose)
-    );
-    if (unauthorizedPurposes.length > 0) {
-      setCreateRequestError(`The following purposes are not allowed by the contract: ${unauthorizedPurposes.join(', ')}`);
-      setCreateRequestLoading(false);
-      return;
-    }
-
     try {
       const api = createAxiosInstance();
       await api.post('/data-requests/send-request', requestForm);
@@ -494,7 +599,8 @@ export default function OrgDashboard() {
       window.location.reload();
     } catch (err) {
       console.error('Error creating data request:', err);
-      setCreateRequestError(err.response?.data?.detail || 'Failed to create data request');
+      const errorMessage = err.response?.data?.detail || err.response?.data?.message || 'Failed to create data request';
+      setCreateRequestError(typeof errorMessage === 'string' ? errorMessage : 'Failed to create data request');
     } finally {
       setCreateRequestLoading(false);
     }
@@ -586,6 +692,9 @@ export default function OrgDashboard() {
     setCreateContractError("");
     setContractForm({
       target_org_id: "",
+      contract_name: "",
+      contract_type: "data_sharing",
+      contract_description: "",
       resources_allowed: [],
       approval_message: ""
     });
@@ -612,6 +721,20 @@ export default function OrgDashboard() {
   const handleCloseCreateContractModal = () => {
     setShowCreateContractModal(false);
     setCreateContractError("");
+    // Reset form
+    setContractForm({
+      target_org_id: "",
+      contract_name: "",
+      contract_type: "data_sharing",
+      contract_description: "",
+      resources_allowed: [],
+      approval_message: ""
+    });
+    setContractResourceForm({
+      resource_name: "",
+      purpose: [],
+      retention_window: "30 days"
+    });
   };
 
   const handleCreateContract = async (e) => {
@@ -634,8 +757,12 @@ export default function OrgDashboard() {
     try {
       const api = createAxiosInstance();
       
+      // Get target organization name for contract naming
+      const targetOrg = allOrganizations.find(org => org.org_id === contractForm.target_org_id);
+      const targetOrgName = targetOrg ? targetOrg.org_name : 'Unknown Organization';
+      
       // Prepare resources with proper structure
-      const resourcesWithTimestamps = contractForm.resources_allowed.map(resource => ({
+      const resourcesWithTimestamps = (contractForm.resources_allowed || []).map(resource => ({
         resource_name: resource.resource_name,
         purpose: resource.purpose,
         retention_window: resource.retention_window,
@@ -646,6 +773,9 @@ export default function OrgDashboard() {
       
       const contractData = {
         target_org_id: contractForm.target_org_id,
+        contract_name: contractForm.contract_name.trim() || `Contract with ${targetOrgName} - ${new Date().toLocaleDateString()}`,
+        contract_type: contractForm.contract_type,
+        contract_description: contractForm.contract_description || `Data sharing agreement with ${targetOrgName}`,
         resources_allowed: resourcesWithTimestamps,
         approval_message: contractForm.approval_message
       };
@@ -655,7 +785,8 @@ export default function OrgDashboard() {
       window.location.reload();
     } catch (err) {
       console.error('Error creating contract:', err);
-      setCreateContractError(err.response?.data?.detail || 'Failed to create contract');
+      const errorMessage = err.response?.data?.detail || err.response?.data?.message || 'Failed to create contract';
+      setCreateContractError(typeof errorMessage === 'string' ? errorMessage : 'Failed to create contract');
     } finally {
       setCreateContractLoading(false);
     }
@@ -746,16 +877,527 @@ export default function OrgDashboard() {
     }
   };
 
+  // Contract Management Functions
+  const fetchContractTypes = async () => {
+    try {
+      const api = createAxiosInstance();
+      const response = await api.get('/inter-org-contracts/contract-types');
+      setContractTypes(response.data.contract_types || []);
+    } catch (err) {
+      console.error('Error fetching contract types:', err);
+    }
+  };
+
+  const handleOpenEditContractModal = (contract) => {
+    setSelectedContract(contract);
+    setEditContractForm({
+      contract_name: contract.contract_name || contract.contract_id,
+      contract_description: contract.contract_description || "",
+      contract_type: contract.contract_type || "data_sharing",
+      resources_allowed: contract.resources_allowed || [],
+      approval_message: ""
+    });
+    setShowEditContractModal(true);
+    setContractActionError("");
+  };
+
+  const handleCloseEditContractModal = () => {
+    setShowEditContractModal(false);
+    setSelectedContract(null);
+    setEditContractForm({
+      contract_name: "",
+      contract_description: "",
+      contract_type: "data_sharing",
+      resources_allowed: [],
+      approval_message: ""
+    });
+    setContractActionError("");
+  };
+
+  const handleEditContract = async (e) => {
+    e.preventDefault();
+    setContractActionLoading(true);
+    setContractActionError("");
+
+    if (!editContractForm.contract_name.trim()) {
+      setContractActionError("Contract name is required");
+      setContractActionLoading(false);
+      return;
+    }
+
+    if (editContractForm.resources_allowed.length === 0) {
+      setContractActionError("At least one resource is required");
+      setContractActionLoading(false);
+      return;
+    }
+
+    try {
+      const api = createAxiosInstance();
+      
+      // Prepare resources with proper structure
+      const resourcesWithTimestamps = (editContractForm.resources_allowed || []).map(resource => ({
+        resource_name: resource.resource_name,
+        purpose: resource.purpose,
+        retention_window: resource.retention_window,
+        created_at: new Date().toISOString(),
+        ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        signature: ""
+      }));
+      
+      const updateData = {
+        contract_id: selectedContract.contract_id,
+        contract_name: editContractForm.contract_name,
+        contract_description: editContractForm.contract_description,
+        contract_type: editContractForm.contract_type,
+        resources_allowed: resourcesWithTimestamps,
+        approval_message: editContractForm.approval_message
+      };
+      
+      await api.put('/inter-org-contracts/update', updateData);
+      setShowEditContractModal(false);
+      window.location.reload();
+    } catch (err) {
+      console.error('Error updating contract:', err);
+      const errorMessage = err.response?.data?.detail || err.response?.data?.message || 'Failed to update contract';
+      setContractActionError(typeof errorMessage === 'string' ? errorMessage : 'Failed to update contract');
+    } finally {
+      setContractActionLoading(false);
+    }
+  };
+
+  const handleOpenDeleteContractModal = (contract) => {
+    setSelectedContract(contract);
+    setDeleteContractForm({
+      deletion_reason: "",
+      approval_message: ""
+    });
+    setShowDeleteContractModal(true);
+    setContractActionError("");
+  };
+
+  const handleCloseDeleteContractModal = () => {
+    setShowDeleteContractModal(false);
+    setSelectedContract(null);
+    setDeleteContractForm({
+      deletion_reason: "",
+      approval_message: ""
+    });
+    setContractActionError("");
+  };
+
+  const handleDeleteContract = async (e) => {
+    e.preventDefault();
+    setContractActionLoading(true);
+    setContractActionError("");
+
+    if (!deleteContractForm.deletion_reason.trim()) {
+      setContractActionError("Deletion reason is required");
+      setContractActionLoading(false);
+      return;
+    }
+
+    try {
+      const api = createAxiosInstance();
+      
+      const deletionData = {
+        contract_id: selectedContract.contract_id,
+        deletion_reason: deleteContractForm.deletion_reason,
+        approval_message: deleteContractForm.approval_message
+      };
+      
+      await api.delete('/inter-org-contracts/delete', { data: deletionData });
+      setShowDeleteContractModal(false);
+      window.location.reload();
+    } catch (err) {
+      console.error('Error deleting contract:', err);
+      const errorMessage = err.response?.data?.detail || err.response?.data?.message || 'Failed to delete contract';
+      setContractActionError(typeof errorMessage === 'string' ? errorMessage : 'Failed to delete contract');
+    } finally {
+      setContractActionLoading(false);
+    }
+  };
+
+  const handleApproveContractAction = async (contractId, actionType) => {
+    const response_message = prompt('Optional: Add a response message for approval');
+    
+    try {
+      const api = createAxiosInstance();
+      await api.post('/inter-org-contracts/approve-action', {
+        contract_id: contractId,
+        action_type: actionType,
+        status: 'approved',
+        response_message
+      });
+      window.location.reload();
+    } catch (err) {
+      console.error('Error approving contract action:', err);
+      alert('Failed to approve contract action: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleRejectContractAction = async (contractId, actionType) => {
+    const response_message = prompt('Optional: Add a response message for rejection');
+    
+    try {
+      const api = createAxiosInstance();
+      await api.post('/inter-org-contracts/approve-action', {
+        contract_id: contractId,
+        action_type: actionType,
+        status: 'rejected',
+        response_message
+      });
+      window.location.reload();
+    } catch (err) {
+      console.error('Error rejecting contract action:', err);
+      alert('Failed to reject contract action: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleOpenContractVersionsModal = async (contract) => {
+    setSelectedContract(contract);
+    setShowContractVersionsModal(true);
+    
+    try {
+      const api = createAxiosInstance();
+      const response = await api.get(`/inter-org-contracts/versions/${contract.contract_id}`);
+      setContractVersions(response.data.versions || []);
+    } catch (err) {
+      console.error('Error fetching contract versions:', err);
+      setContractVersions([]);
+    }
+  };
+
+  const handleOpenContractAuditModal = async (contract) => {
+    setSelectedContract(contract);
+    setShowContractAuditModal(true);
+    
+    try {
+      const api = createAxiosInstance();
+      const response = await api.get(`/inter-org-contracts/audit-logs/${contract.contract_id}`);
+      setContractAuditLogs(response.data.audit_logs || []);
+    } catch (err) {
+      console.error('Error fetching contract audit logs:', err);
+      setContractAuditLogs([]);
+    }
+  };
+
+  const handleEditContractFormChange = (field, value) => {
+    setEditContractForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleDeleteContractFormChange = (field, value) => {
+    setDeleteContractForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleEditContractResourceFormChange = (field, value) => {
+    setContractResourceForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleAddEditContractResource = () => {
+    if (!contractResourceForm.resource_name || contractResourceForm.purpose.length === 0) {
+      alert("Please select a resource and at least one purpose");
+      return;
+    }
+
+    setEditContractForm(prev => ({
+      ...prev,
+      resources_allowed: [...prev.resources_allowed, { ...contractResourceForm }]
+    }));
+
+    // Reset resource form
+    setContractResourceForm({
+      resource_name: "",
+      purpose: [],
+      retention_window: "30 days"
+    });
+  };
+
+  const handleRemoveEditContractResource = (index) => {
+    setEditContractForm(prev => ({
+      ...prev,
+      resources_allowed: prev.resources_allowed.filter((_, i) => i !== index)
+    }));
+  };
+
   // Remove Contracts and Compliance from the tabs array
   const tabs = [
     { id: 'overview', label: 'Overview', icon: <Activity size={16} /> },
     { id: 'users', label: 'User Management', icon: <Users size={16} /> },
     { id: 'data_requests', label: 'Data Requests', icon: <FileText size={16} /> },
+
     { id: 'contracts', label: 'Contracts', icon: <FileText size={16} /> },
     { id: 'contract_logs', label: 'Contract Logs', icon: <Database size={16} /> },
     { id: 'audit_logs', label: 'Audit Logs', icon: <Database size={16} /> },
     { id: 'data_categories', label: 'Data Categories', icon: <Database size={16} /> },
   ];
+
+  const handleViewApprovedData = async (requestId) => {
+    setApprovedDataLoading(true);
+    setApprovedDataError("");
+    setShowApprovedDataModal(true);
+    try {
+      const api = createAxiosInstance();
+      const response = await api.get(`/data-requests/approved-data/${requestId}`);
+      setApprovedData(response.data);
+    } catch (err) {
+      setApprovedDataError("Failed to fetch approved PII data");
+      setApprovedData(null);
+    } finally {
+      setApprovedDataLoading(false);
+    }
+  };
+
+  const handleCloseApprovedDataModal = () => {
+    setShowApprovedDataModal(false);
+    setApprovedData(null);
+    setApprovedDataError("");
+  };
+
+  // Bulk data request handlers
+  const handleOpenBulkRequestModal = async () => {
+    setShowBulkRequestModal(true);
+    setBulkRequestError("");
+    setSelectedUsersForBulk([]);
+    setTargetOrgUsers([]);
+    setTargetOrgContracts([]);
+    setBulkRequestForm({
+      target_org_id: "",
+      selected_resources: [],
+      selected_purposes: [],
+      retention_window: "30 days",
+      request_message: ""
+    });
+    // Fetch contract-based organizations
+    await fetchAvailableOrganizations();
+  };
+
+  const handleCloseBulkRequestModal = () => {
+    setShowBulkRequestModal(false);
+    setBulkRequestError("");
+    setSelectedUsersForBulk([]);
+    setTargetOrgUsers([]);
+    setTargetOrgContracts([]);
+  };
+
+  const handleTargetOrgChange = async (orgId) => {
+    if (!orgId) {
+      setTargetOrgUsers([]);
+      setTargetOrgContracts([]);
+      setBulkRequestForm(prev => ({
+        ...prev,
+        target_org_id: "",
+        selected_resources: [],
+        selected_purposes: [],
+        retention_window: "30 days"
+      }));
+      return;
+    }
+
+    setBulkRequestForm(prev => ({ ...prev, target_org_id: orgId }));
+    setSelectedUsersForBulk([]);
+    setBulkRequestError("");
+
+    try {
+      const api = createAxiosInstance();
+      
+      // Get users from target organization
+      const usersResponse = await api.get(`/organization/${orgId}/users`);
+      setTargetOrgUsers(usersResponse.data || []);
+      
+      // Get contracts with this organization to determine available resources and purposes
+      const contractsResponse = await api.get(`/inter-org-contracts/org/${orgIdToUse}`);
+      const contracts = contractsResponse.data || [];
+      
+      // Filter contracts where this org is the target (we can request from them)
+      const relevantContracts = contracts.filter(contract => 
+        contract.target_org_id === orgId && contract.status === 'active'
+      );
+      
+      setTargetOrgContracts(relevantContracts);
+      
+      // Extract available resources and purposes from contracts
+      const availableResources = new Set();
+      const availablePurposes = new Set();
+      let defaultRetention = "30 days";
+      
+      relevantContracts.forEach(contract => {
+        if (contract.resources_allowed) {
+          contract.resources_allowed.forEach(resource => {
+            if (typeof resource === 'object' && resource.resource_name) {
+              availableResources.add(resource.resource_name);
+              if (resource.purpose) {
+                resource.purpose.forEach(p => availablePurposes.add(p));
+              }
+              if (resource.retention_window) {
+                defaultRetention = resource.retention_window;
+              }
+            } else if (typeof resource === 'string') {
+              availableResources.add(resource);
+            }
+          });
+        }
+      });
+      
+      setBulkRequestForm(prev => ({
+        ...prev,
+        target_org_id: orgId,
+        selected_resources: [],
+        selected_purposes: [],
+        retention_window: defaultRetention
+      }));
+      
+    } catch (err) {
+      console.error('Error fetching target organization data:', err);
+      setBulkRequestError('Failed to fetch organization data');
+    }
+  };
+
+  const handleUserSelectionForBulk = (userId, isSelected) => {
+    if (isSelected) {
+      setSelectedUsersForBulk(prev => [...prev, userId]);
+    } else {
+      setSelectedUsersForBulk(prev => prev.filter(id => id !== userId));
+    }
+  };
+
+  const handleBulkRequestSubmit = async (e) => {
+    e.preventDefault();
+    if (selectedUsersForBulk.length === 0) {
+      setBulkRequestError("Please select at least one user");
+      return;
+    }
+    if (!bulkRequestForm.target_org_id) {
+      setBulkRequestError("Please select a target organization");
+      return;
+    }
+    if (bulkRequestForm.selected_resources.length === 0) {
+      setBulkRequestError("Please select at least one resource");
+      return;
+    }
+    if (bulkRequestForm.selected_purposes.length === 0) {
+      setBulkRequestError("Please select at least one purpose");
+      return;
+    }
+
+    // Validate that all required fields are present
+    if (!bulkRequestForm.target_org_id || 
+        !Array.isArray(bulkRequestForm.selected_resources) || 
+        !Array.isArray(bulkRequestForm.selected_purposes)) {
+      setBulkRequestError("Invalid form data. Please check your selections.");
+      return;
+    }
+
+    setBulkRequestLoading(true);
+    setBulkRequestError("");
+
+    try {
+      const api = createAxiosInstance();
+      
+      // Extract actual user IDs from unique identifiers
+      const selectedUserIds = selectedUsersForBulk.map(uniqueId => {
+        const userId = uniqueId.split('_')[0];
+        const parsedId = parseInt(userId);
+        if (isNaN(parsedId)) {
+          throw new Error(`Invalid user ID: ${userId}`);
+        }
+        return parsedId;
+      });
+      
+      // Create single bulk request
+      const bulkRequestData = {
+        target_org_id: bulkRequestForm.target_org_id,
+        selected_users: selectedUserIds,
+        requested_resources: bulkRequestForm.selected_resources,
+        purpose: bulkRequestForm.selected_purposes,
+        retention_window: bulkRequestForm.retention_window,
+        request_message: bulkRequestForm.request_message
+      };
+      
+      console.log('Selected users for bulk:', selectedUsersForBulk);
+      console.log('Extracted user IDs:', selectedUserIds);
+      console.log('Sending bulk request data:', bulkRequestData);
+      
+      const response = await api.post('/data-requests/create-bulk-request', bulkRequestData);
+      
+      setShowBulkRequestModal(false);
+      alert(`Bulk request created successfully! Request ID: ${response.data.bulk_request_id}`);
+      window.location.reload();
+    } catch (err) {
+      console.error('Error creating bulk request:', err);
+      const errorMessage = err.response?.data?.detail || err.response?.data?.message || 'Failed to create bulk request';
+      setBulkRequestError(typeof errorMessage === 'string' ? errorMessage : 'Failed to create bulk request');
+    } finally {
+      setBulkRequestLoading(false);
+    }
+  };
+
+  const handleBulkFormChange = (field, value) => {
+    setBulkRequestForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleBulkResourceToggle = (resource) => {
+    setBulkRequestForm(prev => ({
+      ...prev,
+      selected_resources: prev.selected_resources.includes(resource)
+        ? prev.selected_resources.filter(r => r !== resource)
+        : [...prev.selected_resources, resource]
+    }));
+  };
+
+  const handleBulkPurposeToggle = (purpose) => {
+    setBulkRequestForm(prev => ({
+      ...prev,
+      selected_purposes: prev.selected_purposes.includes(purpose)
+        ? prev.selected_purposes.filter(p => p !== purpose)
+        : [...prev.selected_purposes, purpose]
+    }));
+  };
+
+  // Bulk data viewing handlers
+  const handleViewBulkData = async (fileId) => {
+    setShowBulkDataModal(true);
+    setBulkDataLoading(true);
+    setBulkDataError("");
+    
+    try {
+      const api = createAxiosInstance();
+      const response = await api.get(`/data-requests/view-excel/${fileId}`);
+      
+      // Create a blob URL for the Excel file
+      const blob = new Blob([response.data], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      });
+      const url = URL.createObjectURL(blob);
+      setBulkDataUrl(url);
+    } catch (err) {
+      console.error('Error loading bulk data:', err);
+      const errorMessage = err.response?.data?.detail || err.response?.data?.message || 'Failed to load bulk data';
+      setBulkDataError(typeof errorMessage === 'string' ? errorMessage : 'Failed to load bulk data');
+    } finally {
+      setBulkDataLoading(false);
+    }
+  };
+
+  const handleCloseBulkDataModal = () => {
+    setShowBulkDataModal(false);
+    setBulkDataError("");
+    if (bulkDataUrl) {
+      URL.revokeObjectURL(bulkDataUrl);
+      setBulkDataUrl("");
+    }
+  };
 
   if (loading) {
     return (
@@ -867,36 +1509,190 @@ export default function OrgDashboard() {
           {activeTab === 'users' && (
             <div>
               <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1.5rem' }}>User Management</h2>
+              
+              {/* Search and Filter Controls */}
+              <div style={{ 
+                background: 'white', 
+                borderRadius: '12px', 
+                padding: '1.5rem', 
+                marginBottom: '1.5rem',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.03)' 
+              }}>
+                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  {/* Search */}
+                  <div style={{ flex: '1', minWidth: '250px' }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', fontSize: '0.875rem' }}>
+                      Search Users
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Search by username, name, or email..."
+                      value={userSearchTerm}
+                      onChange={(e) => setUserSearchTerm(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        fontSize: '0.875rem'
+                      }}
+                    />
+                  </div>
+                  
+                  {/* Status Filter */}
+                  <div style={{ minWidth: '150px' }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', fontSize: '0.875rem' }}>
+                      Status
+                    </label>
+                    <select
+                      value={userFilterStatus}
+                      onChange={(e) => setUserFilterStatus(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        fontSize: '0.875rem'
+                      }}
+                    >
+                      <option value="all">All Users</option>
+                      <option value="active">Active Users</option>
+                      <option value="inactive">Inactive Users</option>
+                    </select>
+                  </div>
+                  
+                  {/* Resource Filter */}
+                  <div style={{ minWidth: '150px' }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', fontSize: '0.875rem' }}>
+                      Resource Type
+                    </label>
+                    <select
+                      value={userFilterResource}
+                      onChange={(e) => setUserFilterResource(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        fontSize: '0.875rem'
+                      }}
+                    >
+                      <option value="all">All Resources</option>
+                      <option value="email">Email</option>
+                      <option value="phone">Phone</option>
+                      <option value="address">Address</option>
+                      <option value="aadhaar">Aadhaar</option>
+                      <option value="pan">PAN</option>
+                      <option value="bank_account">Bank Account</option>
+                      <option value="credit_card">Credit Card</option>
+                    </select>
+                  </div>
+                </div>
+                
+                {/* Results Summary */}
+                <div style={{ 
+                  marginTop: '1rem', 
+                  padding: '0.75rem', 
+                  background: '#f9fafb', 
+                  borderRadius: '8px',
+                  fontSize: '0.875rem',
+                  color: '#6b7280'
+                }}>
+                  Showing {filteredUsers.length} of {orgUsers.length} users
+                </div>
+              </div>
+              
               <div style={{ background: 'white', borderRadius: '12px', padding: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
                 {!Array.isArray(orgUsers) || orgUsers.length === 0 ? (
-                  <div style={{ color: '#d97706' }}>No users found for this organization.</div>
+                  <div style={{ color: '#d97706', textAlign: 'center', padding: '2rem' }}>
+                    <Users size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                    <div>No users found for this organization.</div>
+                  </div>
+                ) : filteredUsers.length === 0 ? (
+                  <div style={{ color: '#6b7280', textAlign: 'center', padding: '2rem' }}>
+                    <Search size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                    <div>No users match your search criteria.</div>
+                    <div style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
+                      Try adjusting your search terms or filters.
+                    </div>
+                  </div>
                 ) : (
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ background: '#f3f4f6' }}>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>User ID</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Username</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Full Name</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Email</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Phone</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Shared Resources</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Active Policies</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Last Consent</th>
-                        <th style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>Total Data Access</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Username</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Full Name</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Email</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Phone</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Shared Resources</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Active Policies</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Last Consent</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Total Data Access</th>
+                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {orgUsers.map((u, idx) => (
-                        <tr key={idx}>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{u.user_id}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{u.username}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{u.full_name}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{u.email}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{u.phone_number}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{u.shared_resources?.join(', ')}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{u.active_policies_count}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{u.last_consent_date}</td>
-                          <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{u.total_data_access_count}</td>
+                      {filteredUsers.map((u, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>{u.username}</td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>{u.full_name}</td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>{u.email}</td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>{u.phone_number}</td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                              {Array.isArray(u.shared_resources) ? u.shared_resources.map((resource, i) => (
+                                <span key={i} style={{
+                                  background: '#dbeafe',
+                                  color: '#1e40af',
+                                  padding: '0.25rem 0.5rem',
+                                  borderRadius: '12px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '500'
+                                }}>
+                                  {resource}
+                                </span>
+                              )) : (
+                                <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>No resources</span>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                            <span style={{
+                              padding: '0.25rem 0.5rem',
+                              borderRadius: '12px',
+                              fontSize: '0.75rem',
+                              fontWeight: '500',
+                              background: u.active_policies_count > 0 ? '#dcfce7' : '#fee2e2',
+                              color: u.active_policies_count > 0 ? '#166534' : '#dc2626'
+                            }}>
+                              {u.active_policies_count}
+                            </span>
+                          </td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                            {u.last_consent_date ? new Date(u.last_consent_date).toLocaleDateString() : 'Never'}
+                          </td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                            {u.total_data_access_count || 0}
+                          </td>
+                          <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                            <button
+                              onClick={() => handleOpenUserPIIModal(u)}
+                              disabled={userPIILoading}
+                              style={{
+                                background: '#2563eb',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                padding: '0.5rem 0.75rem',
+                                cursor: userPIILoading ? 'not-allowed' : 'pointer',
+                                fontSize: '0.75rem',
+                                fontWeight: '500',
+                                opacity: userPIILoading ? 0.6 : 1
+                              }}
+                            >
+                              {userPIILoading ? 'Loading...' : 'View PII'}
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -909,25 +1705,81 @@ export default function OrgDashboard() {
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                 <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>Data Access Requests</h2>
-                <button
-                  onClick={handleOpenCreateModal}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    background: '#2563eb',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    padding: '0.75rem 1rem',
-                    cursor: 'pointer',
-                    fontWeight: '500',
-                    fontSize: '0.875rem'
-                  }}
-                >
-                  <Plus size={16} />
-                  Create Request
-                </button>
+                                  <div style={{ display: 'flex', gap: '1rem' }}>
+                    <button
+                      onClick={handleOpenBulkRequestModal}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        background: '#059669',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '0.75rem 1rem',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        fontSize: '0.875rem'
+                      }}
+                    >
+                      <Download size={16} />
+                      Bulk Request
+                    </button>
+                    <button
+                      onClick={handleOpenCreateModal}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        background: '#2563eb',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '0.75rem 1rem',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        fontSize: '0.875rem'
+                      }}
+                    >
+                      <Plus size={16} />
+                      Create Request
+                    </button>
+                    {dataRequests.some(req => req.is_requester && req.status === 'approved' && new Date(req.expires_at) > new Date()) && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            const api = createAxiosInstance();
+                            const response = await api.get(`/data-requests/bulk-approved-data/${orgIdToUse}`);
+                            
+                            if (response.data && response.data.file_id) {
+                              // Open the encrypted Excel file in web viewer
+                              const viewUrl = `${api.defaults.baseURL}/data-requests/view-excel/${response.data.file_id}`;
+                              window.open(viewUrl, '_blank', 'noopener,noreferrer');
+                            }
+                          } catch (err) {
+                            console.error('Error generating Excel file:', err);
+                            alert('Failed to generate Excel file: ' + (err.response?.data?.detail || err.message));
+                          }
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          background: '#dc2626',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          padding: '0.75rem 1rem',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          fontSize: '0.875rem'
+                        }}
+                      >
+                        <FileText size={16} />
+                        View Excel
+                      </button>
+                    )}
+                  </div>
               </div>
               
               {/* Contract requirement notice */}
@@ -964,36 +1816,52 @@ export default function OrgDashboard() {
                     </div>
                   </div>
                 ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ background: '#f3f4f6' }}>
-                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Type</th>
-                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Request ID</th>
-                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Organization</th>
-                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Target User</th>
-                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Resources</th>
-                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Purpose</th>
-                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Retention</th>
-                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Status</th>
-                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Created</th>
-                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Expires</th>
-                        <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Actions</th>
-                      </tr>
-                    </thead>
+                  <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '1200px' }}>
+                      <thead>
+                        <tr style={{ background: '#f3f4f6' }}>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', whiteSpace: 'nowrap' }}>Type</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', whiteSpace: 'nowrap' }}>Request ID</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', whiteSpace: 'nowrap' }}>Organization</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', whiteSpace: 'nowrap' }}>Target User</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', whiteSpace: 'nowrap' }}>Resources</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', whiteSpace: 'nowrap' }}>Purpose</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', whiteSpace: 'nowrap' }}>Retention</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', whiteSpace: 'nowrap' }}>Status</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', whiteSpace: 'nowrap' }}>Created</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', whiteSpace: 'nowrap' }}>Expires</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', whiteSpace: 'nowrap' }}>Actions</th>
+                        </tr>
+                      </thead>
                     <tbody>
                       {dataRequests.map((req, idx) => (
                         <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
                           <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
-                            <span style={{
-                              padding: '0.25rem 0.75rem',
-                              borderRadius: '12px',
-                              fontSize: '0.75rem',
-                              fontWeight: '500',
-                              background: req.is_requester ? '#dbeafe' : '#fef3c7',
-                              color: req.is_requester ? '#1e40af' : '#d97706'
-                            }}>
-                              {req.is_requester ? 'Sent' : 'Received'}
-                            </span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                              <span style={{
+                                padding: '0.25rem 0.75rem',
+                                borderRadius: '12px',
+                                fontSize: '0.75rem',
+                                fontWeight: '500',
+                                background: req.is_requester ? '#dbeafe' : '#fef3c7',
+                                color: req.is_requester ? '#1e40af' : '#d97706'
+                              }}>
+                                {req.is_requester ? 'Sent' : 'Received'}
+                              </span>
+                              {req.is_bulk_request && (
+                                <span style={{
+                                  padding: '0.25rem 0.5rem',
+                                  borderRadius: '8px',
+                                  fontSize: '0.7rem',
+                                  fontWeight: '500',
+                                  background: '#7c3aed',
+                                  color: 'white',
+                                  alignSelf: 'flex-start'
+                                }}>
+                                  Bulk ({req.bulk_request_size || req.individual_requests?.length || 'N/A'})
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
                             <code style={{ background: '#f3f4f6', padding: '0.25rem 0.5rem', borderRadius: '4px' }}>
@@ -1060,21 +1928,39 @@ export default function OrgDashboard() {
                           <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>
                             {req.status === 'pending' && !req.is_requester ? (
                               <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                <button 
-                                  style={{ 
-                                    background: '#059669', 
-                                    color: 'white', 
-                                    border: 'none', 
-                                    borderRadius: '6px', 
-                                    padding: '0.5rem 0.75rem', 
-                                    cursor: 'pointer',
-                                    fontSize: '0.75rem',
-                                    fontWeight: '500'
-                                  }}
-                                  onClick={() => handleApproveRequest(req.request_id)}
-                                >
-                                  Approve
-                                </button>
+                                {req.is_bulk_request ? (
+                                  <button 
+                                    style={{ 
+                                      background: '#059669', 
+                                      color: 'white', 
+                                      border: 'none', 
+                                      borderRadius: '6px', 
+                                      padding: '0.5rem 0.75rem', 
+                                      cursor: 'pointer',
+                                      fontSize: '0.75rem',
+                                      fontWeight: '500'
+                                    }}
+                                    onClick={() => handleApproveBulkRequest(req.bulk_request_id)}
+                                  >
+                                    Approve Bulk
+                                  </button>
+                                ) : (
+                                  <button 
+                                    style={{ 
+                                      background: '#059669', 
+                                      color: 'white', 
+                                      border: 'none', 
+                                      borderRadius: '6px', 
+                                      padding: '0.5rem 0.75rem', 
+                                      cursor: 'pointer',
+                                      fontSize: '0.75rem',
+                                      fontWeight: '500'
+                                    }}
+                                    onClick={() => handleApproveRequest(req.request_id)}
+                                  >
+                                    Approve
+                                  </button>
+                                )}
                                 <button 
                                   style={{ 
                                     background: '#dc2626', 
@@ -1106,15 +1992,44 @@ export default function OrgDashboard() {
                                 )}
                               </span>
                             )}
+                            {req.is_requester && req.status === 'approved' && new Date(req.expires_at) > new Date() && (
+                              <button
+                                style={{
+                                  background: req.is_bulk_request ? '#059669' : '#2563eb',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  padding: '0.5rem 0.75rem',
+                                  cursor: 'pointer',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '500',
+                                  marginLeft: '0.5rem'
+                                }}
+                                onClick={() => {
+                                  if (req.is_bulk_request && req.excel_file_id) {
+                                    handleViewBulkData(req.excel_file_id);
+                                  } else if (req.is_bulk_request) {
+                                    // For bulk requests without excel_file_id, generate it
+                                    alert('Bulk data export not available yet. Please contact the target organization to approve the request.');
+                                  } else {
+                                    handleViewApprovedData(req.request_id);
+                                  }
+                                }}
+                              >
+                                {req.is_bulk_request ? 'View Bulk Data' : 'View Data'}
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             </div>
           )}
+
           {activeTab === 'contracts' && (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
@@ -1267,6 +2182,7 @@ export default function OrgDashboard() {
                         <tr style={{ background: '#f3f4f6' }}>
                           <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Type</th>
                           <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Contract ID</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Contract Name</th>
                           <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Organization</th>
                           <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Resources</th>
                           <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Purpose</th>
@@ -1296,6 +2212,9 @@ export default function OrgDashboard() {
                               <code style={{ background: '#f3f4f6', padding: '0.25rem 0.5rem', borderRadius: '4px' }}>
                                 {contract.contract_id?.substring(0, 8)}...
                               </code>
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                              {contract.contract_name || 'Unnamed Contract'}
                             </td>
                             <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
                               {contract.is_requester ? contract.target_org_name : contract.source_org_name}
@@ -1340,20 +2259,41 @@ export default function OrgDashboard() {
                               }
                             </td>
                             <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>
-                              <span style={{
-                                padding: '0.25rem 0.75rem',
-                                borderRadius: '12px',
-                                fontSize: '0.75rem',
-                                fontWeight: '500',
-                                background: contract.status === 'active' ? '#dcfce7' : 
-                                           contract.status === 'rejected' ? '#fee2e2' : 
-                                           contract.status === 'expired' ? '#fef3c7' : '#dbeafe',
-                                color: contract.status === 'active' ? '#166534' : 
-                                       contract.status === 'rejected' ? '#dc2626' : 
-                                       contract.status === 'expired' ? '#d97706' : '#1e40af'
-                              }}>
-                                {contract.status}
-                              </span>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                {/* Status display */}
+                                <span style={{
+                                  padding: '0.25rem 0.5rem',
+                                  borderRadius: '12px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '500',
+                                  background: contract.approval_status === 'approved' ? '#dcfce7' : 
+                                             contract.approval_status === 'rejected' ? '#fee2e2' : 
+                                             contract.approval_status === 'pending' ? '#fef3c7' : '#f3f4f6',
+                                  color: contract.approval_status === 'approved' ? '#166534' : 
+                                         contract.approval_status === 'rejected' ? '#dc2626' : 
+                                         contract.approval_status === 'pending' ? '#d97706' : '#6b7280'
+                                }}>
+                                  {contract.approval_status || 'Unknown'}
+                                </span>
+                                
+                                {/* Contract status */}
+                                {contract.status && (
+                                  <span style={{
+                                    padding: '0.25rem 0.5rem',
+                                    borderRadius: '12px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '500',
+                                    background: contract.status === 'active' ? '#dcfce7' : 
+                                               contract.status === 'expired' ? '#fee2e2' : 
+                                               contract.status === 'deleted' ? '#fee2e2' : '#f3f4f6',
+                                    color: contract.status === 'active' ? '#166534' : 
+                                           contract.status === 'expired' ? '#dc2626' : 
+                                           contract.status === 'deleted' ? '#dc2626' : '#6b7280'
+                                  }}>
+                                    {contract.status}
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
                               {new Date(contract.created_at).toLocaleDateString()}
@@ -1362,48 +2302,164 @@ export default function OrgDashboard() {
                               {new Date(contract.ends_at).toLocaleDateString()}
                             </td>
                             <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb' }}>
-                              {contract.approval_status === 'pending' && !contract.is_requester ? (
-                                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                  <button 
-                                    style={{ 
-                                      background: '#059669', 
-                                      color: 'white', 
-                                      border: 'none', 
-                                      borderRadius: '6px', 
-                                      padding: '0.5rem 0.75rem', 
-                                      cursor: 'pointer',
-                                      fontSize: '0.75rem',
-                                      fontWeight: '500'
-                                    }}
-                                    onClick={() => handleApproveContract(contract.contract_id)}
-                                  >
-                                    Approve
-                                  </button>
-                                  <button 
-                                    style={{ 
-                                      background: '#dc2626', 
-                                      color: 'white', 
-                                      border: 'none', 
-                                      borderRadius: '6px', 
-                                      padding: '0.5rem 0.75rem', 
-                                      cursor: 'pointer',
-                                      fontSize: '0.75rem',
-                                      fontWeight: '500'
-                                    }}
-                                    onClick={() => handleRejectContract(contract.contract_id)}
-                                  >
-                                    Reject
-                                  </button>
-                                </div>
-                              ) : (
-                                <span style={{ 
-                                  color: contract.approval_status === 'approved' ? '#059669' : 
-                                         contract.approval_status === 'rejected' ? '#dc2626' : '#6b7280',
-                                  fontSize: '0.875rem'
-                                }}>
-                                  {contract.approval_status}
-                                </span>
-                              )}
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                {/* Approval/Rejection buttons for pending contracts */}
+                                {contract.approval_status === 'pending' && !contract.is_requester ? (
+                                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    <button 
+                                      style={{ 
+                                        background: '#059669', 
+                                        color: 'white', 
+                                        border: 'none', 
+                                        borderRadius: '6px', 
+                                        padding: '0.5rem 0.75rem', 
+                                        cursor: 'pointer',
+                                        fontSize: '0.75rem',
+                                        fontWeight: '500'
+                                      }}
+                                      onClick={() => handleApproveContract(contract.contract_id)}
+                                    >
+                                      Approve
+                                    </button>
+                                    <button 
+                                      style={{ 
+                                        background: '#dc2626', 
+                                        color: 'white', 
+                                        border: 'none', 
+                                        borderRadius: '6px', 
+                                        padding: '0.5rem 0.75rem', 
+                                        cursor: 'pointer',
+                                        fontSize: '0.75rem',
+                                        fontWeight: '500'
+                                      }}
+                                      onClick={() => handleRejectContract(contract.contract_id)}
+                                    >
+                                      Reject
+                                    </button>
+                                  </div>
+                                ) : null}
+                                
+                                {/* Action buttons for active contracts */}
+                                {contract.status === 'active' && (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                                    {/* Edit Contract */}
+                                    <button
+                                      style={{
+                                        background: '#2563eb',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        padding: '0.25rem 0.5rem',
+                                        cursor: 'pointer',
+                                        fontSize: '0.75rem',
+                                        fontWeight: '500'
+                                      }}
+                                      onClick={() => handleOpenEditContractModal(contract)}
+                                      title="Edit Contract"
+                                    >
+                                      <Edit size={12} />
+                                    </button>
+                                    
+                                    {/* Delete Contract */}
+                                    <button
+                                      style={{
+                                        background: '#dc2626',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        padding: '0.25rem 0.5rem',
+                                        cursor: 'pointer',
+                                        fontSize: '0.75rem',
+                                        fontWeight: '500'
+                                      }}
+                                      onClick={() => handleOpenDeleteContractModal(contract)}
+                                      title="Delete Contract"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                    
+                                    {/* View Versions */}
+                                    <button
+                                      style={{
+                                        background: '#059669',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        padding: '0.25rem 0.5rem',
+                                        cursor: 'pointer',
+                                        fontSize: '0.75rem',
+                                        fontWeight: '500'
+                                      }}
+                                      onClick={() => handleOpenContractVersionsModal(contract)}
+                                      title="View Versions"
+                                    >
+                                      <History size={12} />
+                                    </button>
+                                    
+                                    {/* View Audit Logs */}
+                                    <button
+                                      style={{
+                                        background: '#d97706',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        padding: '0.25rem 0.5rem',
+                                        cursor: 'pointer',
+                                        fontSize: '0.75rem',
+                                        fontWeight: '500'
+                                      }}
+                                      onClick={() => handleOpenContractAuditModal(contract)}
+                                      title="View Audit Logs"
+                                    >
+                                      <FileText size={12} />
+                                    </button>
+                                  </div>
+                                )}
+                                
+                                {/* Action approval buttons for pending actions */}
+                                {(contract.is_update_request || contract.is_deletion_request) && 
+                                 ((contract.is_update_request && contract.requested_by_org_id !== orgIdToUse) ||
+                                  (contract.is_deletion_request && contract.requested_by_org_id !== orgIdToUse)) ? (
+                                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    <button
+                                      style={{
+                                        background: '#059669',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '6px',
+                                        padding: '0.5rem 0.75rem',
+                                        cursor: 'pointer',
+                                        fontSize: '0.75rem',
+                                        fontWeight: '500'
+                                      }}
+                                      onClick={() => handleApproveContractAction(
+                                        contract.contract_id, 
+                                        contract.is_update_request ? 'update' : 'delete'
+                                      )}
+                                    >
+                                      Approve {contract.is_update_request ? 'Update' : 'Deletion'}
+                                    </button>
+                                    <button
+                                      style={{
+                                        background: '#dc2626',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '6px',
+                                        padding: '0.5rem 0.75rem',
+                                        cursor: 'pointer',
+                                        fontSize: '0.75rem',
+                                        fontWeight: '500'
+                                      }}
+                                      onClick={() => handleRejectContractAction(
+                                        contract.contract_id, 
+                                        contract.is_update_request ? 'update' : 'delete'
+                                      )}
+                                    >
+                                      Reject {contract.is_update_request ? 'Update' : 'Deletion'}
+                                    </button>
+                                  </div>
+                                ) : null}
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -1416,28 +2472,56 @@ export default function OrgDashboard() {
           )}
           {activeTab === 'contract_logs' && (
             <div style={{ background: 'white', borderRadius: 8, boxShadow: '0 2px 8px #0001', padding: '2rem', marginTop: '2rem' }}>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1.5rem' }}>Contract Logs</h2>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1rem' }}>Contract Logs</h2>
+              <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '1.5rem' }}>
+                Showing logs for active contracts only. Deleted contracts are excluded from this view.
+              </p>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: '#f3f4f6' }}>
                     <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Contract ID</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Contract Name</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Action Type</th>
                     <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Created At</th>
-                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Source Org ID</th>
-                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Target Org ID</th>
-                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Contract Type</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Source Org</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Target Org</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Details</th>
                   </tr>
                 </thead>
                 <tbody>
                   {contractLogs.length === 0 ? (
-                    <tr><td colSpan={5} style={{ textAlign: 'center', padding: '1.5rem', color: '#6b7280' }}>No contract logs found.</td></tr>
+                    <tr><td colSpan={7} style={{ textAlign: 'center', padding: '1.5rem', color: '#6b7280' }}>No contract logs found.</td></tr>
                   ) : (
                     contractLogs.map(log => (
                       <tr key={log._id}>
                         <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{log.contract_id}</td>
+                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{log.contract_name || 'N/A'}</td>
+                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>
+                          <span style={{
+                            padding: '0.25rem 0.5rem',
+                            borderRadius: '12px',
+                            fontSize: '0.75rem',
+                            fontWeight: '500',
+                            background: log.log_type === 'contract_creation' ? '#dcfce7' : 
+                                       log.log_type === 'contract_update' ? '#dbeafe' :
+                                       log.log_type === 'contract_deletion' ? '#fef3c7' : '#f3f4f6',
+                            color: log.log_type === 'contract_creation' ? '#166534' :
+                                   log.log_type === 'contract_update' ? '#1e40af' :
+                                   log.log_type === 'contract_deletion' ? '#92400e' : '#6b7280'
+                          }}>
+                            {log.log_type === 'contract_creation' ? 'Creation' : 
+                             log.log_type === 'contract_update' ? 'Update' :
+                             log.log_type === 'contract_deletion' ? 'Deletion' : log.log_type}
+                          </span>
+                        </td>
                         <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{new Date(log.created_at).toLocaleString()}</td>
                         <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{log.source_org_id}</td>
                         <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{log.target_org_id}</td>
-                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{log.log_type === 'contract_creation' ? 'Contract Creation' : log.log_type === 'contract_response' ? 'Contract Response' : log.log_type}</td>
+                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>
+                          {log.deletion_reason && <div><strong>Reason:</strong> {log.deletion_reason}</div>}
+                          {log.update_reason && <div><strong>Reason:</strong> {log.update_reason}</div>}
+                          {log.update_version && <div><strong>Version:</strong> {log.update_version}</div>}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -1897,6 +2981,7 @@ export default function OrgDashboard() {
                 <select
                   value={contractForm.target_org_id}
                   onChange={(e) => handleContractFormChange('target_org_id', e.target.value)}
+                  required
                   style={{
                     width: '100%',
                     padding: '0.75rem',
@@ -1912,6 +2997,70 @@ export default function OrgDashboard() {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Contract Name *
+                </label>
+                <input
+                  type="text"
+                  value={contractForm.contract_name}
+                  onChange={(e) => handleContractFormChange('contract_name', e.target.value)}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                  placeholder="Enter contract name (e.g., Contract with BankABC - 7/18/2025)"
+                />
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Contract Type *
+                </label>
+                <select
+                  value={contractForm.contract_type}
+                  onChange={(e) => handleContractFormChange('contract_type', e.target.value)}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  {contractTypes.map((type) => (
+                    <option key={type.type_id} value={type.type_id}>
+                      {type.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Contract Description
+                </label>
+                <textarea
+                  value={contractForm.contract_description}
+                  onChange={(e) => handleContractFormChange('contract_description', e.target.value)}
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Describe the purpose and scope of this contract"
+                />
               </div>
 
               <div style={{ marginBottom: '1.5rem' }}>
@@ -2014,11 +3163,11 @@ export default function OrgDashboard() {
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
                   Contract Resources
                 </label>
-                {contractForm.resources_allowed.length === 0 ? (
+                {!contractForm.resources_allowed || contractForm.resources_allowed.length === 0 ? (
                   <div style={{ color: '#d97706', fontSize: '0.875rem' }}>No resources added to this contract yet.</div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                    {contractForm.resources_allowed.map((resource, index) => (
+                    {(contractForm.resources_allowed || []).map((resource, index) => (
                       <div key={index} style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -2030,7 +3179,7 @@ export default function OrgDashboard() {
                       }}>
                         <span style={{ fontWeight: '500', color: '#111827' }}>{resource.resource_name}</span>
                         <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>({resource.retention_window})</span>
-                        <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>({resource.purpose.join(', ')})</span>
+                        <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>({Array.isArray(resource.purpose) ? resource.purpose.join(', ') : resource.purpose || 'No purpose specified'})</span>
                         <button
                           type="button"
                           onClick={() => handleRemoveContractResource(index)}
@@ -2093,16 +3242,16 @@ export default function OrgDashboard() {
                 </button>
                 <button
                   type="submit"
-                  disabled={createContractLoading || contractForm.target_org_id === "" || contractForm.resources_allowed.length === 0}
+                  disabled={createContractLoading || contractForm.target_org_id === "" || contractForm.contract_name.trim() === "" || contractForm.resources_allowed.length === 0}
                   style={{
                     padding: '0.75rem 1.5rem',
                     border: 'none',
                     borderRadius: '8px',
-                    background: createContractLoading || contractForm.target_org_id === "" || contractForm.resources_allowed.length === 0 
+                    background: createContractLoading || contractForm.target_org_id === "" || contractForm.contract_name.trim() === "" || contractForm.resources_allowed.length === 0 
                       ? '#9ca3af' 
                       : '#2563eb',
                     color: 'white',
-                    cursor: createContractLoading || contractForm.target_org_id === "" || contractForm.resources_allowed.length === 0 
+                    cursor: createContractLoading || contractForm.target_org_id === "" || contractForm.contract_name.trim() === "" || contractForm.resources_allowed.length === 0 
                       ? 'not-allowed' 
                       : 'pointer',
                     fontSize: '0.875rem',
@@ -2113,6 +3262,1335 @@ export default function OrgDashboard() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Contract Modal */}
+      {showEditContractModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '2rem',
+            width: '90%',
+            maxWidth: '800px',
+            maxHeight: '90vh',
+            overflow: 'auto'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '1.5rem'
+            }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>
+                Edit Contract: {selectedContract?.contract_name || selectedContract?.contract_id}
+              </h2>
+              <button
+                onClick={handleCloseEditContractModal}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '0.5rem'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {contractActionError && (
+              <div style={{
+                background: '#fee2e2',
+                color: '#dc2626',
+                padding: '0.75rem',
+                borderRadius: '8px',
+                marginBottom: '1rem',
+                fontSize: '0.875rem'
+              }}>
+                {contractActionError}
+              </div>
+            )}
+
+            <form onSubmit={handleEditContract}>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Contract Name *
+                </label>
+                <input
+                  type="text"
+                  value={editContractForm.contract_name}
+                  onChange={(e) => handleEditContractFormChange('contract_name', e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                  placeholder="Enter contract name"
+                />
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Contract Type
+                </label>
+                <select
+                  value={editContractForm.contract_type}
+                  onChange={(e) => handleEditContractFormChange('contract_type', e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  {contractTypes.map((type) => (
+                    <option key={type.type_id} value={type.type_id}>
+                      {type.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Contract Description
+                </label>
+                <textarea
+                  value={editContractForm.contract_description}
+                  onChange={(e) => handleEditContractFormChange('contract_description', e.target.value)}
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Describe the purpose and scope of this contract"
+                />
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Update Resources
+                </label>
+                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                  <select
+                    value={contractResourceForm.resource_name}
+                    onChange={(e) => handleEditContractResourceFormChange('resource_name', e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '0.75rem',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      fontSize: '0.875rem'
+                    }}
+                  >
+                    <option value="">Select a resource...</option>
+                    {availableContractResources.map((resource) => (
+                      <option key={resource} value={resource}>
+                        {resource.charAt(0).toUpperCase() + resource.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={contractResourceForm.retention_window}
+                    onChange={(e) => handleEditContractResourceFormChange('retention_window', e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '0.75rem',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      fontSize: '0.875rem'
+                    }}
+                  >
+                    <option value="7 days">7 days</option>
+                    <option value="15 days">15 days</option>
+                    <option value="30 days">30 days</option>
+                    <option value="60 days">60 days</option>
+                    <option value="90 days">90 days</option>
+                    <option value="1 year">1 year</option>
+                    <option value="2 years">2 years</option>
+                    <option value="5 years">5 years</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  {availablePurposes.map((purpose) => (
+                    <button
+                      key={purpose}
+                      type="button"
+                      onClick={() => handleContractResourcePurposeToggle(purpose)}
+                      style={{
+                        padding: '0.5rem 1rem',
+                        border: contractResourceForm.purpose.includes(purpose) 
+                          ? '2px solid #2563eb' 
+                          : '2px solid #e5e7eb',
+                        borderRadius: '20px',
+                        background: contractResourceForm.purpose.includes(purpose) 
+                          ? '#dbeafe' 
+                          : 'white',
+                        color: contractResourceForm.purpose.includes(purpose) 
+                          ? '#1e40af' 
+                          : '#374151',
+                        cursor: 'pointer',
+                        fontSize: '0.875rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      {purpose}
+                    </button>
+                  ))}
+                </div>
+                {contractResourceForm.resource_name === "" || contractResourceForm.purpose.length === 0 ? (
+                  <div style={{ color: '#dc2626', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+                    Please select a resource and at least one purpose
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleAddEditContractResource}
+                    style={{
+                      marginTop: '1rem',
+                      padding: '0.75rem 1.5rem',
+                      border: '1px solid #2563eb',
+                      borderRadius: '8px',
+                      background: '#2563eb',
+                      color: 'white',
+                      cursor: 'pointer',
+                      fontSize: '0.875rem',
+                      fontWeight: '500'
+                    }}
+                  >
+                    Add Resource
+                  </button>
+                )}
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Current Resources
+                </label>
+                {!editContractForm.resources_allowed || editContractForm.resources_allowed.length === 0 ? (
+                  <div style={{ color: '#d97706', fontSize: '0.875rem' }}>No resources in this contract.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {(editContractForm.resources_allowed || []).map((resource, index) => (
+                      <div key={index} style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        background: '#f9fafb',
+                        padding: '0.75rem',
+                        borderRadius: '8px',
+                        border: '1px solid #e5e7eb'
+                      }}>
+                        <span style={{ fontWeight: '500', color: '#111827' }}>{resource.resource_name}</span>
+                        <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>({resource.retention_window})</span>
+                        <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>({Array.isArray(resource.purpose) ? resource.purpose.join(', ') : resource.purpose || 'No purpose specified'})</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveEditContractResource(index)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#dc2626',
+                            cursor: 'pointer',
+                            fontSize: '1rem'
+                          }}
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Update Message (Optional)
+                </label>
+                <textarea
+                  value={editContractForm.approval_message}
+                  onChange={(e) => handleEditContractFormChange('approval_message', e.target.value)}
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Add a message explaining the changes for the other organization."
+                />
+              </div>
+
+              <div style={{
+                display: 'flex',
+                gap: '1rem',
+                justifyContent: 'flex-end'
+              }}>
+                <button
+                  type="button"
+                  onClick={handleCloseEditContractModal}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    background: 'white',
+                    color: '#374151',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={contractActionLoading || editContractForm.contract_name.trim() === "" || editContractForm.resources_allowed.length === 0}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: 'none',
+                    borderRadius: '8px',
+                    background: contractActionLoading || editContractForm.contract_name.trim() === "" || editContractForm.resources_allowed.length === 0 
+                      ? '#9ca3af' 
+                      : '#2563eb',
+                    color: 'white',
+                    cursor: contractActionLoading || editContractForm.contract_name.trim() === "" || editContractForm.resources_allowed.length === 0 
+                      ? 'not-allowed' 
+                      : 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  {contractActionLoading ? 'Updating...' : 'Request Update'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Contract Modal */}
+      {showDeleteContractModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '2rem',
+            width: '90%',
+            maxWidth: '500px'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '1.5rem'
+            }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>
+                Delete Contract: {selectedContract?.contract_name || selectedContract?.contract_id}
+              </h2>
+              <button
+                onClick={handleCloseDeleteContractModal}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '0.5rem'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {contractActionError && (
+              <div style={{
+                background: '#fee2e2',
+                color: '#dc2626',
+                padding: '0.75rem',
+                borderRadius: '8px',
+                marginBottom: '1rem',
+                fontSize: '0.875rem'
+              }}>
+                {contractActionError}
+              </div>
+            )}
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <div style={{
+                background: '#fef3c7',
+                color: '#d97706',
+                padding: '1rem',
+                borderRadius: '8px',
+                marginBottom: '1rem'
+              }}>
+                <AlertTriangle size={20} style={{ marginBottom: '0.5rem' }} />
+                <strong>Warning:</strong> This action will request deletion of the contract. The other organization must approve this request before the contract is actually deleted.
+              </div>
+            </div>
+
+            <form onSubmit={handleDeleteContract}>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Deletion Reason *
+                </label>
+                <textarea
+                  value={deleteContractForm.deletion_reason}
+                  onChange={(e) => handleDeleteContractFormChange('deletion_reason', e.target.value)}
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Please provide a reason for deleting this contract"
+                />
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Additional Message (Optional)
+                </label>
+                <textarea
+                  value={deleteContractForm.approval_message}
+                  onChange={(e) => handleDeleteContractFormChange('approval_message', e.target.value)}
+                  rows={2}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Add any additional message for the other organization"
+                />
+              </div>
+
+              <div style={{
+                display: 'flex',
+                gap: '1rem',
+                justifyContent: 'flex-end'
+              }}>
+                <button
+                  type="button"
+                  onClick={handleCloseDeleteContractModal}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    background: 'white',
+                    color: '#374151',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={contractActionLoading || deleteContractForm.deletion_reason.trim() === ""}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: 'none',
+                    borderRadius: '8px',
+                    background: contractActionLoading || deleteContractForm.deletion_reason.trim() === "" 
+                      ? '#9ca3af' 
+                      : '#dc2626',
+                    color: 'white',
+                    cursor: contractActionLoading || deleteContractForm.deletion_reason.trim() === "" 
+                      ? 'not-allowed' 
+                      : 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  {contractActionLoading ? 'Requesting...' : 'Request Deletion'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Contract Versions Modal */}
+      {showContractVersionsModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '2rem',
+            width: '90%',
+            maxWidth: '800px',
+            maxHeight: '90vh',
+            overflow: 'auto'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '1.5rem'
+            }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>
+                Contract Versions: {selectedContract?.contract_name || selectedContract?.contract_id}
+              </h2>
+              <button
+                onClick={() => setShowContractVersionsModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '0.5rem'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {!contractVersions || contractVersions.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: '#6b7280' }}>
+                <History size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                <div>No version history found for this contract.</div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {Array.isArray(contractVersions) ? contractVersions.map((version, index) => (
+                  <div key={version.version_id} style={{
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    padding: '1rem',
+                    background: '#f9fafb'
+                  }}>
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '0.5rem'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ fontWeight: '600', color: '#111827' }}>
+                          Version {version.version_number}
+                        </span>
+                        <span style={{
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '12px',
+                          fontSize: '0.75rem',
+                          fontWeight: '500',
+                          background: version.approval_status === 'approved' ? '#dcfce7' : 
+                                     version.approval_status === 'rejected' ? '#fee2e2' : '#fef3c7',
+                          color: version.approval_status === 'approved' ? '#166534' : 
+                                 version.approval_status === 'rejected' ? '#dc2626' : '#d97706'
+                        }}>
+                          {version.approval_status}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                        {new Date(version.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                    
+                    <div style={{ marginBottom: '0.5rem' }}>
+                      <strong>Name:</strong> {version.contract_name}
+                    </div>
+                    
+                    {version.contract_description && (
+                      <div style={{ marginBottom: '0.5rem' }}>
+                        <strong>Description:</strong> {version.contract_description}
+                      </div>
+                    )}
+                    
+                    <div style={{ marginBottom: '0.5rem' }}>
+                      <strong>Type:</strong> {version.contract_type}
+                    </div>
+                    
+                    {version.change_summary && (
+                      <div style={{ marginBottom: '0.5rem' }}>
+                        <strong>Change Summary:</strong> {version.change_summary}
+                      </div>
+                    )}
+                    
+                    <div style={{ marginBottom: '0.5rem' }}>
+                      <strong>Resources:</strong>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.25rem' }}>
+                        {version.resources_allowed && Array.isArray(version.resources_allowed) ? version.resources_allowed.map((resource, i) => (
+                          <span key={i} style={{
+                            background: '#dbeafe',
+                            color: '#1e40af',
+                            padding: '0.25rem 0.5rem',
+                            borderRadius: '12px',
+                            fontSize: '0.75rem',
+                            fontWeight: '500'
+                          }}>
+                            {resource.resource_name}
+                          </span>
+                        )) : (
+                          <span style={{ color: '#6b7280', fontSize: '0.875rem' }}>No resources specified</span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {version.rejection_reason && (
+                      <div style={{ 
+                        background: '#fee2e2', 
+                        color: '#dc2626', 
+                        padding: '0.5rem', 
+                        borderRadius: '4px',
+                        fontSize: '0.875rem'
+                      }}>
+                        <strong>Rejection Reason:</strong> {version.rejection_reason}
+                      </div>
+                    )}
+                  </div>
+                )) : (
+                  <div style={{ textAlign: 'center', padding: '1rem', color: '#6b7280' }}>
+                    No versions available
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Contract Audit Logs Modal */}
+      {showContractAuditModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '2rem',
+            width: '90%',
+            maxWidth: '1000px',
+            maxHeight: '90vh',
+            overflow: 'auto'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '1.5rem'
+            }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>
+                Contract Audit Logs: {selectedContract?.contract_name || selectedContract?.contract_id}
+              </h2>
+              <button
+                onClick={() => setShowContractAuditModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '0.5rem'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {!contractAuditLogs || contractAuditLogs.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: '#6b7280' }}>
+                <FileText size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                <div>No audit logs found for this contract.</div>
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: '#f3f4f6' }}>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Action</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Timestamp</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>User ID</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Organization</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>IP Address</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.isArray(contractAuditLogs) ? contractAuditLogs.map((log) => (
+                    <tr key={log.id}>
+                      <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>
+                        <span style={{
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '12px',
+                          fontSize: '0.75rem',
+                          fontWeight: '500',
+                          background: log.action_type.includes('approved') ? '#dcfce7' : 
+                                     log.action_type.includes('rejected') ? '#fee2e2' : '#dbeafe',
+                          color: log.action_type.includes('approved') ? '#166534' : 
+                                 log.action_type.includes('rejected') ? '#dc2626' : '#1e40af'
+                        }}>
+                          {log.action_type.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>
+                        {new Date(log.timestamp).toLocaleString()}
+                      </td>
+                      <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>
+                        {log.action_by}
+                      </td>
+                      <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>
+                        {log.action_by_org_id}
+                      </td>
+                      <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>
+                        {log.ip_address || 'N/A'}
+                      </td>
+                      <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>
+                        <details>
+                          <summary style={{ cursor: 'pointer', fontSize: '0.875rem' }}>View Details</summary>
+                          <pre style={{ 
+                            marginTop: '0.5rem', 
+                            fontSize: '0.75rem', 
+                            background: '#f9fafb', 
+                            padding: '0.5rem', 
+                            borderRadius: '4px',
+                            overflow: 'auto'
+                          }}>
+                            {JSON.stringify(log.action_details, null, 2)}
+                          </pre>
+                        </details>
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: 'center', padding: '1.5rem', color: '#6b7280' }}>
+                        No audit logs available
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* User PII Modal */}
+      {showUserPIIModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '2rem',
+            width: '90%',
+            maxWidth: '800px',
+            maxHeight: '90vh',
+            overflow: 'auto'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '1.5rem'
+            }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>
+                User PII Data
+              </h2>
+              <button
+                onClick={handleCloseUserPIIModal}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '0.5rem'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {userPIILoading ? (
+              <div style={{ textAlign: 'center', padding: '2rem' }}>
+                <div style={{ fontSize: '1rem', color: '#6b7280' }}>Loading user PII data...</div>
+              </div>
+            ) : selectedUserPII ? (
+              <div>
+                {/* User Info */}
+                <div style={{ 
+                  background: '#f9fafb', 
+                  padding: '1rem', 
+                  borderRadius: '8px', 
+                  marginBottom: '1.5rem' 
+                }}>
+                  <h3 style={{ fontSize: '1.125rem', fontWeight: '600', marginBottom: '0.5rem' }}>
+                    User Information
+                  </h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                    <div>
+                      <strong>Username:</strong> {selectedUserPII.username}
+                    </div>
+                    <div>
+                      <strong>Full Name:</strong> {selectedUserPII.full_name}
+                    </div>
+                    <div>
+                      <strong>Email:</strong> {selectedUserPII.email}
+                    </div>
+                  </div>
+                </div>
+
+                {/* PII Data */}
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <h3 style={{ fontSize: '1.125rem', fontWeight: '600', marginBottom: '1rem' }}>
+                    PII Data Shared
+                  </h3>
+                  {selectedUserPII.pii && selectedUserPII.pii.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                      {selectedUserPII.pii.map((piiItem, index) => (
+                        <div key={index} style={{
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '8px',
+                          padding: '1rem',
+                          background: '#f9fafb'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                            <strong style={{ color: '#1e40af' }}>{piiItem.resource}</strong>
+                            <span style={{
+                              padding: '0.25rem 0.5rem',
+                              borderRadius: '12px',
+                              fontSize: '0.75rem',
+                              fontWeight: '500',
+                              background: '#dcfce7',
+                              color: '#166534'
+                            }}>
+                              Shared
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                            <strong>Original Value:</strong> {piiItem.original || 'Not available'}
+                          </div>
+                          <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                            <strong>Tokenized Value:</strong> {piiItem.token}
+                          </div>
+                          <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                            <strong>Created:</strong> {new Date(piiItem.created_at).toLocaleString()}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ 
+                      textAlign: 'center', 
+                      padding: '2rem', 
+                      color: '#6b7280',
+                      background: '#f9fafb',
+                      borderRadius: '8px'
+                    }}>
+                      <Shield size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                      <div>No PII data has been shared for this user.</div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Active Policies */}
+                <div>
+                  <h3 style={{ fontSize: '1.125rem', fontWeight: '600', marginBottom: '1rem' }}>
+                    Active Policies
+                  </h3>
+                  {selectedUserPII.active_policies && selectedUserPII.active_policies.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                      {selectedUserPII.active_policies.map((policy, index) => (
+                        <div key={index} style={{
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '8px',
+                          padding: '1rem',
+                          background: '#f9fafb'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                            <strong style={{ color: '#1e40af' }}>{policy.resource_name}</strong>
+                            <span style={{
+                              padding: '0.25rem 0.5rem',
+                              borderRadius: '12px',
+                              fontSize: '0.75rem',
+                              fontWeight: '500',
+                              background: policy.status === 'active' ? '#dcfce7' : '#fef3c7',
+                              color: policy.status === 'active' ? '#166534' : '#92400e'
+                            }}>
+                              {policy.status === 'active' ? 'Active' : 'Revoked'}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.5rem' }}>
+                            <strong>Purpose:</strong> {Array.isArray(policy.purpose) ? policy.purpose.join(', ') : policy.purpose}
+                          </div>
+                          <div style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.5rem' }}>
+                            <strong>Created:</strong> {new Date(policy.created_at).toLocaleString()}
+                          </div>
+                          <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                            <strong>Expires:</strong> {new Date(policy.expiry).toLocaleDateString()}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ 
+                      textAlign: 'center', 
+                      padding: '2rem', 
+                      color: '#6b7280',
+                      background: '#f9fafb',
+                      borderRadius: '8px'
+                    }}>
+                      <FileText size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                      <div>No active policies found for this user.</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '2rem', color: '#6b7280' }}>
+                <AlertTriangle size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                <div>Failed to load user PII data.</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showApprovedDataModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.25)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: '12px', padding: '2rem', minWidth: 400, maxWidth: 600, boxShadow: '0 2px 16px #0002', position: 'relative' }}>
+            <button onClick={handleCloseApprovedDataModal} style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#6b7280' }}><X size={20} /></button>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', color: '#2563eb' }}>Approved PII Data</h2>
+            {approvedDataLoading ? (
+              <div style={{ color: '#2563eb', textAlign: 'center', padding: '2rem' }}>Loading...</div>
+            ) : approvedDataError ? (
+              <div style={{ color: '#dc2626', textAlign: 'center', padding: '2rem' }}>{approvedDataError}</div>
+            ) : approvedData ? (
+              <div>
+                <div style={{ marginBottom: '1rem' }}>
+                  <strong>Full Name:</strong> {approvedData.user_info.full_name}<br />
+                  <strong>Email:</strong> {approvedData.user_info.email}
+                </div>
+                <div style={{ marginBottom: '1rem' }}>
+                  <strong>PII Data:</strong>
+                  <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+                    {approvedData.pii_data.map((item, idx) => (
+                      <li key={idx} style={{ marginBottom: '0.5rem' }}>
+                        <span style={{ fontWeight: 500, color: '#1e40af' }}>{item.resource}:</span> {item.value}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <strong>Active Policies:</strong>
+                  <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+                    {approvedData.active_policies.map((policy, idx) => (
+                      <li key={idx} style={{ marginBottom: '0.5rem' }}>
+                        <span style={{ fontWeight: 500 }}>{policy.resource_name}</span> - Purpose: {Array.isArray(policy.purpose) ? policy.purpose.join(', ') : policy.purpose}, Retention: {policy.retention_window}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Request Modal */}
+      {showBulkRequestModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.25)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: '12px', padding: '2rem', minWidth: 600, maxWidth: 900, maxHeight: '90vh', overflow: 'auto', boxShadow: '0 2px 16px #0002', position: 'relative' }}>
+            <button onClick={handleCloseBulkRequestModal} style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#6b7280' }}><X size={20} /></button>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1.5rem', color: '#059669' }}>Create Bulk Data Requests</h2>
+            
+            <form onSubmit={handleBulkRequestSubmit}>
+              {/* Target Organization */}
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Target Organization *
+                </label>
+                <select
+                  value={bulkRequestForm.target_org_id}
+                  onChange={(e) => handleTargetOrgChange(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  <option value="">Select organization with active contract...</option>
+                  {contractBasedOrganizations.map(org => (
+                    <option key={org.org_id} value={org.org_id}>
+                      {org.org_name} ({org.org_id}) - {org.allowed_resources.length} resources available
+                    </option>
+                  ))}
+                </select>
+                {contractBasedOrganizations.length === 0 && (
+                  <div style={{ color: '#d97706', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+                    No organizations with active contracts found. Please create contracts first.
+                  </div>
+                )}
+              </div>
+
+              {/* User Selection - Only show if target org is selected */}
+              {bulkRequestForm.target_org_id && (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                    Select Users from {contractBasedOrganizations.find(org => org.org_id === bulkRequestForm.target_org_id)?.org_name} ({selectedUsersForBulk.length} selected)
+                  </label>
+                  {targetOrgUsers.length > 0 ? (
+                    <div style={{ maxHeight: '200px', overflow: 'auto', border: '1px solid #d1d5db', borderRadius: '6px', padding: '0.5rem' }}>
+                      {targetOrgUsers.map(user => {
+                        const uniqueId = `${user.user_id}_${user.email}`;
+                        return (
+                          <label key={uniqueId} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}>
+                            <input
+                              type="checkbox"
+                              checked={selectedUsersForBulk.includes(uniqueId)}
+                              onChange={(e) => handleUserSelectionForBulk(uniqueId, e.target.checked)}
+                              style={{ margin: 0 }}
+                            />
+                            <div>
+                              <div style={{ fontSize: '0.875rem', fontWeight: '500' }}>{user.full_name}</div>
+                              <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{user.email}</div>
+                              <div style={{ fontSize: '0.7rem', color: '#9ca3af' }}>ID: {user.user_id}</div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div style={{ padding: '1rem', background: '#f9fafb', borderRadius: '6px', textAlign: 'center', color: '#6b7280' }}>
+                      Loading users...
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Resources - Only show if target org is selected */}
+              {bulkRequestForm.target_org_id && targetOrgContracts.length > 0 && (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                    Available Resources (from contracts)
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.5rem' }}>
+                    {Array.from(new Set(targetOrgContracts.flatMap(contract => 
+                      contract.resources_allowed?.map(r => typeof r === 'object' ? r.resource_name : r) || []
+                    ))).map(resource => (
+                      <label key={resource} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={bulkRequestForm.selected_resources.includes(resource)}
+                          onChange={() => handleBulkResourceToggle(resource)}
+                          style={{ margin: 0 }}
+                        />
+                        <span style={{ fontSize: '0.875rem' }}>{resource}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Purposes - Only show if resources are selected */}
+              {bulkRequestForm.selected_resources.length > 0 && (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                    Available Purposes (from contracts)
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem' }}>
+                    {Array.from(new Set(targetOrgContracts.flatMap(contract => 
+                      contract.resources_allowed?.flatMap(r => 
+                        typeof r === 'object' && r.purpose ? r.purpose : []
+                      ) || []
+                    ))).map(purpose => (
+                      <label key={purpose} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={bulkRequestForm.selected_purposes.includes(purpose)}
+                          onChange={() => handleBulkPurposeToggle(purpose)}
+                          style={{ margin: 0 }}
+                        />
+                        <span style={{ fontSize: '0.875rem' }}>{purpose}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Retention Window */}
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Retention Window
+                </label>
+                <select
+                  value={bulkRequestForm.retention_window}
+                  onChange={(e) => handleBulkFormChange('retention_window', e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  <option value="7 days">7 days</option>
+                  <option value="30 days">30 days</option>
+                  <option value="90 days">90 days</option>
+                  <option value="1 year">1 year</option>
+                </select>
+              </div>
+
+              {/* Request Message */}
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Request Message (Optional)
+                </label>
+                <textarea
+                  value={bulkRequestForm.request_message}
+                  onChange={(e) => handleBulkFormChange('request_message', e.target.value)}
+                  placeholder="Add a message explaining the purpose of these requests..."
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    fontSize: '0.875rem',
+                    minHeight: '80px',
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+
+              {/* Error Message */}
+              {bulkRequestError && (
+                <div style={{ marginBottom: '1rem', padding: '0.75rem', background: '#fee2e2', color: '#dc2626', borderRadius: '6px', fontSize: '0.875rem' }}>
+                  {bulkRequestError}
+                </div>
+              )}
+
+              {/* Submit Button */}
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={handleCloseBulkRequestModal}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    background: 'white',
+                    color: '#374151',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={bulkRequestLoading}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: 'none',
+                    borderRadius: '6px',
+                    background: bulkRequestLoading ? '#9ca3af' : '#059669',
+                    color: 'white',
+                    cursor: bulkRequestLoading ? 'not-allowed' : 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  {bulkRequestLoading ? 'Creating Requests...' : `Create ${selectedUsersForBulk.length} Requests`}
+                </button>
+              </div>
+            </form>
+
+            {/* Info */}
+            <div style={{ marginTop: '2rem', padding: '1rem', background: '#f0f9ff', borderRadius: '8px', border: '1px solid #bae6fd' }}>
+              <h4 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.5rem', color: '#0369a1' }}>
+                Bulk Request Information
+              </h4>
+              <div style={{ fontSize: '0.875rem', color: '#0c4a6e' }}>
+                <p style={{ marginBottom: '0.5rem' }}>
+                  This will create individual data requests for each selected user. When approved, 
+                  the data will be shared through the standard data request process.
+                </p>
+                <p style={{ marginBottom: 0 }}>
+                  <strong>Selected:</strong> {selectedUsersForBulk.length} users | 
+                  <strong> Resources:</strong> {bulkRequestForm.selected_resources.length} | 
+                  <strong> Purposes:</strong> {bulkRequestForm.selected_purposes.length}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Data Modal */}
+      {showBulkDataModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '2rem',
+            maxWidth: '90vw',
+            maxHeight: '90vh',
+            width: '1200px',
+            position: 'relative',
+            overflow: 'hidden'
+          }}>
+            <button 
+              onClick={handleCloseBulkDataModal} 
+              style={{ 
+                position: 'absolute', 
+                top: 16, 
+                right: 16, 
+                background: 'none', 
+                border: 'none', 
+                fontSize: 20, 
+                cursor: 'pointer', 
+                color: '#6b7280' 
+              }}
+            >
+              <X size={20} />
+            </button>
+            
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1.5rem', color: '#059669' }}>
+              🔒 Secure Bulk Data Viewer
+            </h2>
+            
+            {bulkDataLoading ? (
+              <div style={{ textAlign: 'center', padding: '2rem' }}>
+                <div>Loading encrypted data...</div>
+              </div>
+            ) : bulkDataError ? (
+              <div style={{ 
+                padding: '1rem', 
+                background: '#fee2e2', 
+                color: '#dc2626', 
+                borderRadius: '6px', 
+                fontSize: '0.875rem' 
+              }}>
+                {bulkDataError}
+              </div>
+            ) : bulkDataUrl ? (
+              <div style={{ height: '70vh', position: 'relative' }}>
+                <div style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  background: '#fef3c7',
+                  padding: '0.75rem',
+                  borderBottom: '1px solid #f59e0b',
+                  fontSize: '0.875rem',
+                  color: '#92400e',
+                  zIndex: 10
+                }}>
+                  <strong>⚠️ SECURITY NOTICE:</strong> This is a read-only view. Copying, downloading, or editing is disabled for data protection.
+                </div>
+                
+                <iframe
+                  src={bulkDataUrl}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    border: 'none',
+                    marginTop: '3rem'
+                  }}
+                  title="Bulk Data Viewer"
+                  onContextMenu={(e) => e.preventDefault()}
+                  onDragStart={(e) => e.preventDefault()}
+                  onSelectStart={(e) => e.preventDefault()}
+                />
+              </div>
+            ) : null}
+            
+            <div style={{ 
+              marginTop: '1rem', 
+              padding: '1rem', 
+              background: '#f0f9ff', 
+              borderRadius: '8px', 
+              border: '1px solid #bae6fd',
+              fontSize: '0.875rem',
+              color: '#0c4a6e'
+            }}>
+              <strong>Data Protection Features:</strong>
+              <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
+                <li>🔒 Encrypted data transmission</li>
+                <li>🚫 No copy/paste functionality</li>
+                <li>🚫 No download capability</li>
+                <li>🚫 No editing permissions</li>
+                <li>📊 Read-only Excel viewer</li>
+                <li>⏰ Automatic session timeout</li>
+              </ul>
+            </div>
           </div>
         </div>
       )}

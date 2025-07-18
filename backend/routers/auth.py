@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Body
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Body, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timedelta
 import bcrypt
@@ -400,7 +400,7 @@ async def login_user(login_data: UserLogin):
     )
 
 @router.post("/verify-login", response_model=Token)
-async def verify_login(verification_data: LoginVerification):
+async def verify_login(verification_data: LoginVerification, http_request: Request = None):
     """Verify login with email OTP and return JWT token"""
     
     print(f"🔍 DEBUG: Verify login request - Email: {verification_data.email}, OTP: {verification_data.otp}")
@@ -451,6 +451,34 @@ async def verify_login(verification_data: LoginVerification):
     access_token = create_access_token(
         data={"sub": user["email"], "user_id": user["userid"]}
     )
+    
+    # Log successful login
+    from routers.organization import logs_collection
+    
+    # Get client IP
+    client_ip = "unknown"
+    if http_request:
+        forwarded_for = http_request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            client_ip = forwarded_for.split(",")[0].strip()
+        elif http_request.headers.get("X-Real-IP"):
+            client_ip = http_request.headers.get("X-Real-IP")
+        elif http_request.client:
+            client_ip = http_request.client.host
+    
+    log_entry = {
+        "user_id": user["userid"],
+        "fintech_name": user.get("organization_id", "Individual User"),
+        "resource_name": "login",
+        "purpose": "authentication",
+        "log_type": "user_login",
+        "ip_address": client_ip,
+        "data_source": "individual" if user.get("user_type") == "individual" else "organization",
+        "created_at": datetime.utcnow(),
+        "user_type": user.get("user_type", "individual"),
+        "organization_id": user.get("organization_id")
+    }
+    logs_collection.insert_one(log_entry)
     
     print(f"🎉 DEBUG: Login verification successful for user: {user['userid']}")
     

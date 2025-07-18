@@ -1,4 +1,3 @@
-import os
 import json
 from fastapi import APIRouter, HTTPException, Request, Depends
 from datetime import datetime
@@ -6,19 +5,30 @@ from fastapi.encoders import jsonable_encoder
 from typing import List, Optional
 from pydantic import BaseModel
 
-from models import User
 from helpers import (
     organizations_collection, users_collection, user_pii_collection, 
     policies_collection, logs_collection, get_organization_by_id,
     get_organization_clients, encrypt_pii, decrypt_pii
 )
 from routers.auth import get_current_user
+from jwt_utils import TokenData
 from routers.policy import create_policy_internal
 from routers.pii_tokenizer import (
     tokenize_aadhaar, tokenize_pan, tokenize_account, tokenize_ifsc,
     tokenize_creditcard, tokenize_debitcard, tokenize_gst,
     tokenize_itform16, tokenize_upi, tokenize_passport, tokenize_dl
 )
+
+# Import inter_org_contracts collection at module level to avoid circular imports
+from pymongo import MongoClient
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+MONGO_URL = os.getenv("MONGO_URL")
+client = MongoClient(MONGO_URL)
+db = client.get_database("PedolOne")
+inter_org_contracts_collection = db.get_collection("inter_org_contracts")
 
 router = APIRouter(prefix="/organization", tags=["Organization Management"])
 
@@ -76,10 +86,11 @@ async def get_organizations():
     return {"organizations": organizations}
 
 @router.get("/{org_id}/clients")
-async def get_organization_clients_endpoint(org_id: str, current_user: dict = Depends(get_current_user)):
+async def get_organization_clients_endpoint(org_id: str, current_user: TokenData = Depends(get_current_user)):
     """Get all clients (users who have shared data) for an organization"""
     # Verify user is an organization admin
-    if current_user.get("user_type") != "organization":
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user or user.get("user_type") != "organization":
         raise HTTPException(status_code=403, detail="Only organization admins can access this endpoint")
     
     # Verify organization exists
@@ -93,10 +104,11 @@ async def get_organization_clients_endpoint(org_id: str, current_user: dict = De
     return {"clients": clients}
 
 @router.get("/{org_id}/clients/{user_id}/pii")
-async def get_client_pii(org_id: str, user_id: int, current_user: dict = Depends(get_current_user)):
+async def get_client_pii(org_id: str, user_id: int, current_user: TokenData = Depends(get_current_user)):
     """Get PII data for a specific client"""
     # Verify user is an organization admin
-    if current_user.get("user_type") != "organization":
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user or user.get("user_type") != "organization":
         raise HTTPException(status_code=403, detail="Only organization admins can access this endpoint")
     
     # Verify organization exists
@@ -105,47 +117,66 @@ async def get_client_pii(org_id: str, user_id: int, current_user: dict = Depends
         raise HTTPException(status_code=404, detail="Organization not found")
     
     # Verify user has shared data with this org (has policies)
+    # Check for policies using both target_org_id and shared_with (org name)
     user_policies = list(policies_collection.find({
         "user_id": user_id,
-        "target_org_id": org_id
+        "$or": [
+            {"target_org_id": org_id},
+            {"shared_with": org.get("org_name", "")}
+        ],
+        "is_revoked": {"$ne": True}
     }))
     
     if not user_policies:
-        raise HTTPException(status_code=404, detail="User has not shared data with this organization")
-    
+        raise HTTPException(status_code=404, detail=f"User has not shared data with this organization. User ID: {user_id}, Org ID: {org_id}, Org Name: {org.get('org_name', 'N/A')}")
     # Get user's PII data
     user_pii_doc = user_pii_collection.find_one({"user_id": user_id})
     if not user_pii_doc:
-        return {"pii": []}
-    
+        return {"pii": [], "active_policies": []}
     # Filter PII by resources that user has policies for
     policy_resources = set([policy["resource_name"] for policy in user_policies])
     accessible_pii = [
         pii for pii in user_pii_doc.get("pii", [])
         if pii["resource"] in policy_resources
     ]
-    
-    # Format response (don't return encrypted data)
+    # Detokenize (decrypt) the PII values
+    from helpers import decrypt_pii
     pii_data = []
     for pii in accessible_pii:
+        try:
+            original_value = decrypt_pii(pii["original"])
+        except Exception:
+            original_value = None
         pii_data.append({
             "resource": pii["resource"],
             "token": pii["token"],
-            "created_at": pii["created_at"].isoformat()
+            "original": original_value,
+            "created_at": pii["created_at"].isoformat() if hasattr(pii["created_at"], 'isoformat') else str(pii["created_at"])
         })
-    
-    return {"pii": pii_data}
+    # Format active policies for frontend
+    formatted_policies = []
+    for policy in user_policies:
+        formatted_policies.append({
+            "policy_id": str(policy.get("_id")),
+            "resource_name": policy.get("resource_name"),
+            "purpose": policy.get("purpose", []),
+            "created_at": policy.get("created_at").isoformat() if hasattr(policy.get("created_at"), 'isoformat') else str(policy.get("created_at")),
+            "expiry": policy.get("expiry").isoformat() if hasattr(policy.get("expiry"), 'isoformat') else str(policy.get("expiry")),
+            "status": "active" if not policy.get("is_revoked", False) else "revoked"
+        })
+    return {"pii": pii_data, "active_policies": formatted_policies}
 
 @router.post("/{org_id}/share-data")
 async def share_data_with_organization(
     org_id: str, 
     request: DataShareRequest, 
-    current_user: dict = Depends(get_current_user),
+    current_user: TokenData = Depends(get_current_user),
     http_request: Request = None
 ):
     """Share user data with another organization (inter-organization sharing)"""
     # Verify user is an organization admin
-    if current_user.get("user_type") != "organization":
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user or user.get("user_type") != "organization":
         raise HTTPException(status_code=403, detail="Only organization admins can share data")
     
     # Verify source organization exists
@@ -177,23 +208,44 @@ async def share_data_with_organization(
     if not user_pii_doc:
         raise HTTPException(status_code=404, detail="No PII data found for this user")
     
-    # Load target organization's contract
-    # Map contract_id to filename
-    contract_id_to_file = {
-        "contract_stockbroker_2025": "routers/contract_stockbroker.json",
-        "contract_bankabc_2025": "routers/contract_bankabc.json", 
-        "contract_insurance_2025": "routers/contract_insurance.json"
-    }
+    # Check for active contracts between the organizations
     
-    contract_file = contract_id_to_file.get(target_org['contract_id'])
-    if not contract_file:
-        raise HTTPException(status_code=404, detail=f"Contract mapping not found for {target_org['contract_id']}")
+    active_contracts = list(inter_org_contracts_collection.find({
+        "$or": [
+            {"source_org_id": org_id, "target_org_id": request.target_org_id},
+            {"source_org_id": request.target_org_id, "target_org_id": org_id}
+        ],
+        "status": "active",
+        "approval_status": "approved"
+    }))
     
-    try:
-        with open(contract_file) as f:
-            contract = json.load(f)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Contract file not found: {contract_file}")
+    if not active_contracts:
+        raise HTTPException(status_code=400, detail="No active contracts found between the organizations")
+    
+    # Find contracts that support the requested resources
+    supporting_contracts = []
+    for contract in active_contracts:
+        contract_resources = []
+        if contract.get("resources_allowed"):
+            for resource in contract.get("resources_allowed", []):
+                if isinstance(resource, dict) and "resource_name" in resource:
+                    contract_resources.append(resource["resource_name"])
+                else:
+                    contract_resources.append(str(resource))
+        
+        # Check if this contract supports all requested resources
+        unauthorized_resources = [r for r in request.resources if r not in contract_resources]
+        if not unauthorized_resources:
+            supporting_contracts.append(contract)
+    
+    if not supporting_contracts:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"No active contracts support the requested resources: {', '.join(request.resources)}"
+        )
+    
+    # Use the first supporting contract (or could be enhanced to select the best one)
+    selected_contract = supporting_contracts[0]
     
     # Filter PII by requested resources and available data
     available_pii = [
@@ -211,7 +263,7 @@ async def share_data_with_organization(
     for pii in available_pii:
         # Find matching contract resource
         contract_resource = next(
-            (r for r in contract["resources_allowed"] if r["resource_name"] == pii["resource"]), 
+            (r for r in selected_contract["resources_allowed"] if r["resource_name"] == pii["resource"]), 
             None
         )
         
@@ -221,14 +273,14 @@ async def share_data_with_organization(
         # Decrypt PII for policy creation
         decrypted_pii = decrypt_pii(pii["original"])
         
-        # Create policy for inter-org sharing
+        # Create policy for inter-org sharing using the selected contract
         from models import UserInputPII
         policy_input = UserInputPII(pii_value=decrypted_pii, resource=pii["resource"])
         policy_result = create_policy_internal(
             policy_input, 
             user_id=request.user_id,
             ip_address=client_ip,
-            contract_override=contract,
+            contract_override=selected_contract,
             source_org_id=org_id,
             target_org_id=request.target_org_id
         )
@@ -246,21 +298,29 @@ async def share_data_with_organization(
             "data_source": "organization",
             "source_org_id": org_id,
             "target_org_id": request.target_org_id,
+            "contract_id": selected_contract["contract_id"],
+            "contract_name": selected_contract.get("contract_name", "Legacy Contract"),
             "created_at": datetime.utcnow()
         }
         logs_collection.insert_one(log_entry)
     
     return {
-        "message": f"Data shared successfully with {target_org['org_name']}",
+        "message": f"Data shared successfully with {target_org['org_name']} using contract '{selected_contract.get('contract_name', 'Legacy Contract')}'",
         "policies_created": len(created_policies),
-        "policies": created_policies
+        "policies": created_policies,
+        "contract_used": {
+            "contract_id": selected_contract["contract_id"],
+            "contract_name": selected_contract.get("contract_name", "Legacy Contract"),
+            "contract_type": selected_contract.get("contract_type", "data_sharing")
+        }
     }
 
 @router.get("/{org_id}/data-requests")
-async def get_data_requests(org_id: str, current_user: dict = Depends(get_current_user)):
+async def get_data_requests(org_id: str, current_user: TokenData = Depends(get_current_user)):
     """Get data requests received by this organization"""
     # Verify user is an organization admin
-    if current_user.get("user_type") != "organization":
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user or user.get("user_type") != "organization":
         raise HTTPException(status_code=403, detail="Only organization admins can access this endpoint")
     
     # Verify organization exists

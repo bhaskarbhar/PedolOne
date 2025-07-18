@@ -48,10 +48,11 @@ class User(BaseModel):
     email_otp: Optional[str] = None
     otp_created_at: Optional[datetime] = None
     
-    class Config:
-        json_encoders = {
-            ObjectId: str
-        }
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        populate_by_name=True,
+        json_encoders={ObjectId: str}
+    )
 
 # JWT Token Models
 class Token(BaseModel):
@@ -210,6 +211,9 @@ class ContractResource(BaseModel):
 class InterOrgContract(BaseModel):
     id: Optional[ObjectId] = Field(default=None, alias="_id")
     contract_id: str
+    contract_name: str  # Human-readable name for the contract
+    contract_type: str  # "data_sharing", "file_sharing", "service_integration", etc.
+    contract_description: Optional[str] = None  # Detailed description of the contract
     source_org_id: str
     source_org_name: str
     target_org_id: str
@@ -227,6 +231,9 @@ class InterOrgContract(BaseModel):
     is_update: bool = False
     original_contract_id: Optional[str] = None  # For contract updates
     update_reason: Optional[str] = None
+    # Contract versioning
+    version: str = "1.0"  # Contract version
+    parent_contract_id: Optional[str] = None  # For contract renewals/updates
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -236,18 +243,45 @@ class InterOrgContract(BaseModel):
 
 class CreateInterOrgContract(BaseModel):
     target_org_id: str
+    contract_name: str
+    contract_type: str = "data_sharing"
+    contract_description: Optional[str] = None
     resources_allowed: List[ContractResource]
     approval_message: Optional[str] = None
+    ends_at: Optional[datetime] = None  # Optional custom end date
 
 class UpdateInterOrgContract(BaseModel):
     contract_id: str
+    contract_name: Optional[str] = None
+    contract_description: Optional[str] = None
     resources_allowed: Optional[List[ContractResource]] = None
     update_reason: str
+    ends_at: Optional[datetime] = None
 
 class RespondToContract(BaseModel):
     contract_id: str
     status: str  # "approved" or "rejected"
     response_message: Optional[str] = None
+
+class ContractSummary(BaseModel):
+    contract_id: str
+    contract_name: str
+    contract_type: str
+    source_org_name: str
+    target_org_name: str
+    status: str
+    approval_status: str
+    created_at: datetime
+    ends_at: datetime
+    resource_count: int
+    is_requester: bool  # Whether the current org is the requester
+
+class ContractTypeInfo(BaseModel):
+    type_id: str
+    name: str
+    description: str
+    allowed_resources: List[str]
+    default_retention: str
 
 # --- Organization User Management Models ---
 class OrgUserSummary(BaseModel):
@@ -271,3 +305,65 @@ class OrgUserDetail(BaseModel):
     policies: List[dict]
     pii_data: List[dict]
     consent_history: List[dict]
+
+# --- Contract Management Models ---
+class ContractUpdateRequest(BaseModel):
+    contract_id: str
+    contract_name: Optional[str] = None
+    contract_description: Optional[str] = None
+    contract_type: Optional[str] = None
+    resources_allowed: Optional[List[ContractResource]] = None
+    approval_message: Optional[str] = None
+    version: Optional[str] = None
+
+class ContractDeletionRequest(BaseModel):
+    contract_id: str
+    deletion_reason: str
+    approval_message: Optional[str] = None
+
+class ContractActionRequest(BaseModel):
+    contract_id: str
+    action_type: str  # "update", "delete", "renew", "suspend"
+    status: str  # "approved", "rejected"
+    response_message: Optional[str] = None
+
+class ContractVersion(BaseModel):
+    id: Optional[ObjectId] = Field(default=None, alias="_id")
+    version_id: str
+    version_number: str
+    contract_id: str
+    contract_name: str
+    contract_description: Optional[str] = None
+    contract_type: str
+    resources_allowed: List[ContractResource]
+    created_at: datetime
+    created_by: int
+    parent_version_id: Optional[str] = None
+    change_summary: Optional[str] = None
+    approval_status: str = "pending"  # "pending", "approved", "rejected"
+    approved_by: Optional[int] = None
+    approved_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        populate_by_name=True,
+        json_encoders={ObjectId: str}
+    )
+
+class ContractAuditLog(BaseModel):
+    id: Optional[ObjectId] = Field(default=None, alias="_id")
+    contract_id: str
+    action_type: str  # "created", "updated", "deleted", "approved", "rejected", "suspended", "renewed"
+    action_by: int
+    action_by_org_id: str
+    action_details: dict
+    timestamp: datetime
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        populate_by_name=True,
+        json_encoders={ObjectId: str}
+    )

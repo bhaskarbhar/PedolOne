@@ -8,6 +8,20 @@ const AuditLogTable = ({ logs }) => {
         return <CheckCircle size={14} className="text-green-500" />;
       case 'data_access':
         return <Eye size={14} className="text-blue-500" />;
+      case 'user_login':
+        return <Users size={14} className="text-purple-500" />;
+      case 'contract_creation':
+        return <Building2 size={14} className="text-blue-500" />;
+      case 'contract_request_approved':
+        return <CheckCircle size={14} className="text-green-500" />;
+      case 'contract_request_rejected':
+        return <Shield size={14} className="text-red-500" />;
+      case 'data_request_sent':
+        return <Eye size={14} className="text-blue-500" />;
+      case 'data_request_approved':
+        return <CheckCircle size={14} className="text-green-500" />;
+      case 'data_request_rejected':
+        return <Shield size={14} className="text-red-500" />;
       default:
         return <Database size={14} className="text-gray-500" />;
     }
@@ -19,8 +33,22 @@ const AuditLogTable = ({ logs }) => {
         return 'Consent Granted';
       case 'data_access':
         return 'Data Accessed';
+      case 'user_login':
+        return 'User Login';
+      case 'contract_creation':
+        return 'Contract Created';
+      case 'contract_request_approved':
+        return 'Contract Approved';
+      case 'contract_request_rejected':
+        return 'Contract Rejected';
+      case 'data_request_sent':
+        return 'Data Request Sent';
+      case 'data_request_approved':
+        return 'Data Request Approved';
+      case 'data_request_rejected':
+        return 'Data Request Rejected';
       default:
-        return logType;
+        return logType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
     }
   };
 
