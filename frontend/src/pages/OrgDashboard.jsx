@@ -6,12 +6,12 @@ import {
 import axios from 'axios';
 import AuditLogTable from '../components/AuditLogTable';
 
+const isLocalhost = window.location.hostname === 'localhost';
+const BACKEND_URL = isLocalhost ? '' : 'https://pedolone.onrender.com';
 // Create axios instance with auth token
 const createAxiosInstance = () => {
   const token = localStorage.getItem('token');
-  const isProd = import.meta.env.PROD;
   return axios.create({
-    baseURL: isProd ? 'https://pedolone.onrender.com' : 'http://localhost:8000',
     headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json'
@@ -63,7 +63,6 @@ export default function OrgDashboard() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createRequestLoading, setCreateRequestLoading] = useState(false);
   const [createRequestError, setCreateRequestError] = useState("");
-  const [availableOrganizations, setAvailableOrganizations] = useState([]);
   const [allOrganizations, setAllOrganizations] = useState([]);
   const [availableUsers, setAvailableUsers] = useState([]);
   const [availableResources, setAvailableResources] = useState([]);
@@ -132,7 +131,7 @@ export default function OrgDashboard() {
     const fetchContractLogs = async () => {
       try {
         const api = createAxiosInstance();
-        const res = await api.get(`/policy/org-dashboard/${orgIdToUse}/contract-logs`);
+        const res = await api.get(`${BACKEND_URL}/policy/org-dashboard/${orgIdToUse}/contract-logs`);
         setContractLogs(res.data || []);
       } catch (err) {
         setContractLogs([]);
@@ -160,19 +159,19 @@ export default function OrgDashboard() {
         const api = createAxiosInstance();
         
         // Fetch organization info
-        const orgResponse = await api.get(`/organization/${orgId}`);
+        const orgResponse = await api.get(`${BACKEND_URL}/organization/${orgId}`);
         setOrgInfo(orgResponse.data);
         
         // Fetch users managed by this org
-        const usersResponse = await api.get(`/organization/${orgId}/users`);
+        const usersResponse = await api.get(`${BACKEND_URL}/organization/${orgId}/users`);
         setOrgUsers(usersResponse.data || []);
         
         // Fetch data access requests
-        const requestsResponse = await api.get(`/data-requests/org/${orgId}`);
+        const requestsResponse = await api.get(`${BACKEND_URL}/data-requests/org/${orgId}`);
         setDataRequests(requestsResponse.data || []);
         
         // Fetch inter-org contracts
-        const contractsResponse = await api.get(`/inter-org-contracts/org/${orgId}`);
+        const contractsResponse = await api.get(`${BACKEND_URL}/inter-org-contracts/org/${orgId}`);
         const allContracts = contractsResponse.data || [];
         setContracts(allContracts);
         
@@ -196,7 +195,7 @@ export default function OrgDashboard() {
         setContractStats(stats);
         
         // Fetch audit logs
-        const logsResponse = await api.get(`/policy/org-dashboard/${orgIdToUse}/logs`);
+        const logsResponse = await api.get(`${BACKEND_URL}/policy/org-dashboard/${orgIdToUse}/logs`);
         const logsArr = Array.isArray(logsResponse.data) ? logsResponse.data : [];
         const logs = logsArr.map(log => ({
           id: log._id || log.log_id,
@@ -212,11 +211,11 @@ export default function OrgDashboard() {
         setAuditLogs(logs);
         
         // Fetch data categories
-        const categoriesResponse = await api.get(`/policy/org-dashboard/${orgIdToUse}/data_categories`);
+        const categoriesResponse = await api.get(`${BACKEND_URL}/policy/org-dashboard/${orgIdToUse}/data_categories`);
         setDataCategories(categoriesResponse.data.data_categories || []);
         
         // Fetch compliance metrics
-        const complianceResponse = await api.get(`/policy/compliance/org/${orgId}`);
+        const complianceResponse = await api.get(`${BACKEND_URL}/policy/compliance/org/${orgId}`);
         setComplianceMetrics(complianceResponse.data || []);
         
         setLoading(false);
@@ -236,7 +235,7 @@ export default function OrgDashboard() {
     setLoading(true);
     try {
       const api = createAxiosInstance();
-      const res = await api.get(`/organization/list`);
+      const res = await api.get(`${BACKEND_URL}/organization/list`);
       const orgs = res.data.organizations || [];
       const found = orgs.find(o => o.contract_id === contractId);
       if (found) {
@@ -356,12 +355,12 @@ export default function OrgDashboard() {
     try {
       const api = createAxiosInstance();
       // Use the new endpoint that only returns organizations with active contracts
-      const response = await api.get(`/data-requests/available-organizations/${orgIdToUse}`);
+      const response = await api.get(`${BACKEND_URL}/data-requests/available-organizations/${orgIdToUse}`);
       const orgsWithContracts = response.data || [];
       setContractBasedOrganizations(orgsWithContracts);
       
       // Also fetch all organizations for backward compatibility (contract creation)
-      const allOrgsResponse = await api.get('/organization/list/organizations');
+      const allOrgsResponse = await api.get(`${BACKEND_URL}/organization/list/organizations`);
       const allOrgs = allOrgsResponse.data.organizations || [];
       const filteredOrgs = allOrgs.filter(org => org.org_id !== orgIdToUse);
       setAvailableOrganizations(filteredOrgs);
@@ -369,7 +368,7 @@ export default function OrgDashboard() {
       // Fallback to fetching all organizations
       try {
         const api = createAxiosInstance();
-        const response = await api.get('/organization/list/organizations');
+        const response = await api.get(`${BACKEND_URL}/organization/list/organizations`);
         const allOrgs = response.data.organizations || [];
         const filteredOrgs = allOrgs.filter(org => org.org_id !== orgIdToUse);
         setAvailableOrganizations(filteredOrgs);
@@ -382,7 +381,7 @@ export default function OrgDashboard() {
   const fetchUsersByOrganization = async (orgId) => {
     try {
       const api = createAxiosInstance();
-      const response = await api.get(`/organization/${orgId}/all-users`);
+      const response = await api.get(`${BACKEND_URL}/organization/${orgId}/all-users`);
       const users = response.data.users || [];
       setAvailableUsers(users);
     } catch (err) {
@@ -393,7 +392,7 @@ export default function OrgDashboard() {
   const fetchAvailableResources = async () => {
     try {
       const api = createAxiosInstance();
-      const response = await api.get('/policy/org-dashboard/' + orgIdToUse + '/data_categories');
+      const response = await api.get(`${BACKEND_URL}/policy/org-dashboard/` + orgIdToUse + '/data_categories');
       const categories = response.data.data_categories || [];
       const resources = categories.map(cat => cat.name);
       // Add common PII types as fallback
@@ -591,7 +590,7 @@ export default function OrgDashboard() {
     // Fetch all organizations in PedolOne
     try {
       const api = createAxiosInstance();
-      const response = await api.get('/organization/list/organizations');
+      const response = await api.get(`${BACKEND_URL}/organization/list/organizations`);
       const allOrgs = response.data.organizations || [];
       // Filter out the current organization
       const filteredOrgs = allOrgs.filter(org => org.org_id !== orgIdToUse);
