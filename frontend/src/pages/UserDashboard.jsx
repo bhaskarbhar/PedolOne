@@ -102,6 +102,9 @@ const UserDashboard = () => {
     }
   };
 
+  //backend
+  const isLocalhost = window.location.hostname === 'localhost';
+  const BACKEND_URL = isLocalhost ? '' : 'https://pedolone.onrender.com';
   // Helper function to get axios config with Authorization header
   const getAuthConfig = () => ({
     headers: { Authorization: `Bearer ${token}` }
@@ -114,7 +117,7 @@ const UserDashboard = () => {
       setError(null);
 
       // Fetch user's PII data
-      const piiResponse = await axios.get(`/auth/user-pii/${user.userid}`, getAuthConfig());
+      const piiResponse = await axios.get(`${BACKEND_URL}/auth/user-pii/${user.userid}`, getAuthConfig());
       const piiArr = Array.isArray(piiResponse.data?.pii) ? piiResponse.data.pii : [];
       const piiData = piiArr.map(item => ({
         label: item.resource.charAt(0).toUpperCase() + item.resource.slice(1),
@@ -123,7 +126,7 @@ const UserDashboard = () => {
       setMaskedData(piiData);
 
       // Fetch active policies
-      const policiesResponse = await axios.get(`/policy/user/${user.userid}/active`, getAuthConfig());
+      const policiesResponse = await axios.get(`${BACKEND_URL}/policy/user/${user.userid}/active`, getAuthConfig());
       const policiesArr = Array.isArray(policiesResponse.data) ? policiesResponse.data : [];
       const consents = policiesArr.map(policy => ({
         id: policy.policy_id,
@@ -136,7 +139,7 @@ const UserDashboard = () => {
       setActiveConsents(consents);
 
       // Fetch access logs
-      const logsResponse = await axios.get(`/policy/user/${user.userid}/logs`, getAuthConfig());
+      const logsResponse = await axios.get(`${BACKEND_URL}policy/user/${user.userid}/logs`, getAuthConfig());
       const logsArr = Array.isArray(logsResponse.data) ? logsResponse.data : [];
       let filteredLogs = logsArr;
       if (user?.user_type === 'organization' && user.organization_id) {
@@ -156,13 +159,13 @@ const UserDashboard = () => {
 
       // Fetch data requests (if user is individual)
       if (user.user_type === 'individual') {
-        const requestsResponse = await axios.get(`/data-requests/received/${user.userid}`, getAuthConfig());
+        const requestsResponse = await axios.get(`${BACKEND_URL}/data-requests/received/${user.userid}`, getAuthConfig());
         setDataRequests(requestsResponse.data || []);
       }
 
       // Fetch organization users (if user is organization admin)
       if (user.user_type === 'organization') {
-        const orgUsersResponse = await axios.get(`/organization/${user.organization_id}/clients`, getAuthConfig());
+        const orgUsersResponse = await axios.get(`${BACKEND_URL}/organization/${user.organization_id}/clients`, getAuthConfig());
         setOrgUsers(orgUsersResponse.data || []);
       }
 
@@ -301,7 +304,7 @@ const UserDashboard = () => {
       });
       // Refresh data requests
       if (user.user_type === 'organization') {
-        const requestsResponse = await axios.get(`/data-requests/sent/${user.organization_id}`, getAuthConfig());
+        const requestsResponse = await axios.get(`${BACKEND_URL}/data-requests/sent/${user.organization_id}`, getAuthConfig());
         setDataRequests(requestsResponse.data || []);
       }
     } catch (err) {
@@ -322,7 +325,7 @@ const UserDashboard = () => {
 
   const handleUserClick = async (userId) => {
     try {
-      const response = await axios.get(`/organization/${user.organization_id}/clients/${userId}/pii`, getAuthConfig());
+      const response = await axios.get(`${BACKEND_URL}/organization/${user.organization_id}/clients/${userId}/pii`, getAuthConfig());
       setSelectedUser({
         user_id: userId,
         ...response.data
