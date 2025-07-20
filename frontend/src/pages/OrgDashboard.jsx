@@ -137,7 +137,7 @@ export default function OrgDashboard() {
   // Available resources for contracts
   const [availableContractResources] = useState([
     "aadhaar", "pan", "account", "ifsc", "creditcard", "debitcard", 
-    "gst", "itform16", "upi", "passport", "drivinglicense"
+    "gst", "itform16", "upi", "passport", "drivinglicense", "file_sharing"
   ]);
   
   const [availablePurposes] = useState([
@@ -170,6 +170,29 @@ export default function OrgDashboard() {
   const [approvedData, setApprovedData] = useState(null);
   const [approvedDataLoading, setApprovedDataLoading] = useState(false);
   const [approvedDataError, setApprovedDataError] = useState("");
+
+  // File sharing state
+  const [fileRequests, setFileRequests] = useState([]);
+  const [sharedFiles, setSharedFiles] = useState([]);
+  const [showFileRequestModal, setShowFileRequestModal] = useState(false);
+  const [showUploadFileModal, setShowUploadFileModal] = useState(false);
+  const [showDirectShareModal, setShowDirectShareModal] = useState(false);
+  const [selectedFileRequest, setSelectedFileRequest] = useState(null);
+  const [fileRequestForm, setFileRequestForm] = useState({
+    contract_id: "",
+    target_org_id: "",
+    file_description: "",
+    file_category: "contract",
+    expires_at: ""
+  });
+  const [directShareForm, setDirectShareForm] = useState({
+    target_org_id: "",
+    file_description: "",
+    file_category: "contract",
+    expires_at: ""
+  });
+  const [fileSharingLoading, setFileSharingLoading] = useState(false);
+  const [fileSharingError, setFileSharingError] = useState("");
 
   // Add state for bulk data requests
   const [showBulkRequestModal, setShowBulkRequestModal] = useState(false);
@@ -319,6 +342,19 @@ export default function OrgDashboard() {
         // Fetch compliance metrics
         const complianceResponse = await api.get(`/policy/compliance/org/${orgId}`);
         setComplianceMetrics(complianceResponse.data || []);
+        
+        // Fetch file sharing data
+        try {
+          const fileRequestsResponse = await api.get(`/file-sharing/requests/${orgIdToUse}`);
+          setFileRequests(fileRequestsResponse.data?.file_requests || []);
+          
+          const sharedFilesResponse = await api.get(`/file-sharing/shared-files/${orgIdToUse}`);
+          setSharedFiles(sharedFilesResponse.data?.shared_files || []);
+        } catch (fileErr) {
+          console.error('Error fetching file sharing data:', fileErr);
+          setFileRequests([]);
+          setSharedFiles([]);
+        }
         
         setLoading(false);
       } catch (err) {
@@ -1160,8 +1196,8 @@ export default function OrgDashboard() {
     { id: 'overview', label: 'Overview', icon: <Activity size={16} /> },
     { id: 'users', label: 'User Management', icon: <Users size={16} /> },
     { id: 'data_requests', label: 'Data Requests', icon: <FileText size={16} /> },
-
     { id: 'contracts', label: 'Contracts', icon: <FileText size={16} /> },
+    { id: 'file_sharing', label: 'File Sharing', icon: <FileText size={16} /> },
     { id: 'contract_logs', label: 'Contract Logs', icon: <Database size={16} /> },
     { id: 'audit_logs', label: 'Audit Logs', icon: <Database size={16} /> },
     { id: 'data_categories', label: 'Data Categories', icon: <Database size={16} /> },
@@ -1426,6 +1462,207 @@ export default function OrgDashboard() {
       URL.revokeObjectURL(bulkDataUrl);
       setBulkDataUrl("");
     }
+  };
+
+  // File sharing handlers
+  const handleOpenFileRequestModal = () => {
+    setShowFileRequestModal(true);
+    setFileSharingError("");
+    setFileRequestForm({
+      contract_id: "",
+      target_org_id: "",
+      file_description: "",
+      file_category: "contract",
+      expires_at: ""
+    });
+  };
+
+  const handleCloseFileRequestModal = () => {
+    setShowFileRequestModal(false);
+    setFileSharingError("");
+  };
+
+  const handleCreateFileRequest = async (e) => {
+    e.preventDefault();
+    setFileSharingLoading(true);
+    setFileSharingError("");
+
+    try {
+      const api = createAxiosInstance();
+      const response = await api.post('/file-sharing/request-file', fileRequestForm);
+      
+      setShowFileRequestModal(false);
+      window.location.reload();
+    } catch (err) {
+      console.error('Error creating file request:', err);
+      const errorMessage = err.response?.data?.detail || 'Failed to create file request';
+      setFileSharingError(typeof errorMessage === 'string' ? errorMessage : 'Failed to create file request');
+    } finally {
+      setFileSharingLoading(false);
+    }
+  };
+
+  const handleFileRequestFormChange = (field, value) => {
+    setFileRequestForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleApproveFileRequest = async (requestId) => {
+    try {
+      const api = createAxiosInstance();
+      await api.post(`/file-sharing/approve-request/${requestId}`);
+      window.location.reload();
+    } catch (err) {
+      console.error('Error approving file request:', err);
+      alert('Failed to approve file request: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleRejectFileRequest = async (requestId) => {
+    const rejectionReason = prompt('Please provide a reason for rejection:');
+    if (!rejectionReason) return;
+
+    try {
+      const api = createAxiosInstance();
+      const formData = new FormData();
+      formData.append('rejection_reason', rejectionReason);
+      await api.post(`/file-sharing/reject-request/${requestId}`, formData);
+      window.location.reload();
+    } catch (err) {
+      console.error('Error rejecting file request:', err);
+      alert('Failed to reject file request: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleOpenUploadFileModal = (fileRequest) => {
+    setSelectedFileRequest(fileRequest);
+    setShowUploadFileModal(true);
+    setFileSharingError("");
+  };
+
+  const handleCloseUploadFileModal = () => {
+    setShowUploadFileModal(false);
+    setSelectedFileRequest(null);
+    setFileSharingError("");
+  };
+
+  const handleUploadFile = async (e) => {
+    e.preventDefault();
+    setFileSharingLoading(true);
+    setFileSharingError("");
+
+    const fileInput = document.getElementById('file-upload');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+      setFileSharingError("Please select a PDF file");
+      setFileSharingLoading(false);
+      return;
+    }
+
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      setFileSharingError("Only PDF files are allowed");
+      setFileSharingLoading(false);
+      return;
+    }
+
+    try {
+      const api = createAxiosInstance();
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const fileDescription = document.getElementById('file-description').value;
+      if (fileDescription) {
+        formData.append('file_description', fileDescription);
+      }
+
+      await api.post(`/file-sharing/upload-file/${selectedFileRequest.request_id}`, formData);
+      
+      setShowUploadFileModal(false);
+      window.location.reload();
+    } catch (err) {
+      console.error('Error uploading file:', err);
+      const errorMessage = err.response?.data?.detail || 'Failed to upload file';
+      setFileSharingError(typeof errorMessage === 'string' ? errorMessage : 'Failed to upload file');
+    } finally {
+      setFileSharingLoading(false);
+    }
+  };
+
+  const handleOpenDirectShareModal = () => {
+    setShowDirectShareModal(true);
+    setFileSharingError("");
+    setDirectShareForm({
+      target_org_id: "",
+      file_description: "",
+      file_category: "contract",
+      expires_at: ""
+    });
+  };
+
+  const handleCloseDirectShareModal = () => {
+    setShowDirectShareModal(false);
+    setFileSharingError("");
+  };
+
+  const handleDirectShareFormChange = (field, value) => {
+    setDirectShareForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleDirectFileShare = async (e) => {
+    e.preventDefault();
+    setFileSharingLoading(true);
+    setFileSharingError("");
+
+    const fileInput = document.getElementById('direct-share-file');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+      setFileSharingError("Please select a PDF file");
+      setFileSharingLoading(false);
+      return;
+    }
+
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      setFileSharingError("Only PDF files are allowed");
+      setFileSharingLoading(false);
+      return;
+    }
+
+    try {
+      const api = createAxiosInstance();
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('target_org_id', directShareForm.target_org_id);
+      formData.append('file_description', directShareForm.file_description);
+      formData.append('file_category', directShareForm.file_category);
+      
+      if (directShareForm.expires_at) {
+        formData.append('expires_at', directShareForm.expires_at);
+      }
+
+      await api.post('/file-sharing/direct-share', formData);
+      
+      setShowDirectShareModal(false);
+      window.location.reload();
+    } catch (err) {
+      console.error('Error sharing file:', err);
+      const errorMessage = err.response?.data?.detail || 'Failed to share file';
+      setFileSharingError(typeof errorMessage === 'string' ? errorMessage : 'Failed to share file');
+    } finally {
+      setFileSharingLoading(false);
+    }
+  };
+
+  const handleViewFile = (fileId) => {
+    const token = localStorage.getItem('token');
+    const url = `/file-sharing/view-file/${fileId}?token=${token}`;
+    window.open(url, '_blank', 'width=1200,height=800,scrollbars=yes,resizable=yes');
   };
 
 
@@ -2671,6 +2908,335 @@ export default function OrgDashboard() {
                 ) : (
                   <AuditLogTable logs={auditLogs} />
                 )}
+              </div>
+            </div>
+          )}
+          {activeTab === 'file_sharing' && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                <FileText size={24} style={{ color: '#3b82f6' }} />
+                <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>File Sharing</h2>
+                <div style={{ 
+                  padding: '0.25rem 0.75rem', 
+                  background: 'rgba(59, 130, 246, 0.1)', 
+                  color: '#3b82f6', 
+                  borderRadius: '12px', 
+                  fontSize: '0.75rem', 
+                  fontWeight: '600' 
+                }}>
+                  Secure PDF Sharing
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
+                <button
+                  onClick={handleOpenFileRequestModal}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.75rem 1.5rem',
+                    background: 'linear-gradient(135deg, #3b82f6 0%, #1e40af 100%)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '600'
+                  }}
+                >
+                  <Plus size={16} />
+                  Request File
+                </button>
+                <button
+                  onClick={handleOpenDirectShareModal}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.75rem 1.5rem',
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '600'
+                  }}
+                >
+                  <FileText size={16} />
+                  Send File
+                </button>
+              </div>
+
+              {/* File Requests Section */}
+              <div style={{ marginBottom: '2rem' }}>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1rem', color: '#374151' }}>
+                  File Requests ({fileRequests.length})
+                </h3>
+                <div style={{ 
+                  background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.95) 100%)',
+                  backdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  borderRadius: '16px',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+                  overflow: 'hidden'
+                }}>
+                  {fileRequests.length === 0 ? (
+                    <div style={{ 
+                      padding: '2rem', 
+                      textAlign: 'center', 
+                      color: '#6b7280',
+                      background: 'rgba(255, 255, 255, 0.8)'
+                    }}>
+                      <FileText size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                      <div style={{ fontSize: '1rem', fontWeight: '500', marginBottom: '0.5rem' }}>No File Requests</div>
+                      <div style={{ fontSize: '0.875rem' }}>No file requests have been made yet.</div>
+                    </div>
+                  ) : (
+                    <div style={{ overflow: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)' }}>
+                            <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: '600', color: '#374151' }}>Description</th>
+                            <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: '600', color: '#374151' }}>Category</th>
+                            <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: '600', color: '#374151' }}>Status</th>
+                            <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: '600', color: '#374151' }}>From/To</th>
+                            <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: '600', color: '#374151' }}>Created</th>
+                            <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: '600', color: '#374151' }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {fileRequests.map((request) => (
+                            <tr key={request.request_id} style={{ borderBottom: '1px solid rgba(243, 244, 246, 0.8)' }}>
+                              <td style={{ padding: '1rem' }}>
+                                <div style={{ fontSize: '0.875rem', fontWeight: '500', color: '#374151' }}>
+                                  {request.file_description}
+                                </div>
+                              </td>
+                              <td style={{ padding: '1rem' }}>
+                                <span style={{
+                                  padding: '0.25rem 0.5rem',
+                                  borderRadius: '12px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '500',
+                                  background: '#dbeafe',
+                                  color: '#1e40af'
+                                }}>
+                                  {request.file_category}
+                                </span>
+                              </td>
+                              <td style={{ padding: '1rem' }}>
+                                <span style={{
+                                  padding: '0.25rem 0.5rem',
+                                  borderRadius: '12px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '500',
+                                  background: request.status === 'pending' ? '#fef3c7' : 
+                                             request.status === 'approved' ? '#dcfce7' :
+                                             request.status === 'rejected' ? '#fee2e2' : '#f3f4f6',
+                                  color: request.status === 'pending' ? '#92400e' :
+                                         request.status === 'approved' ? '#166534' :
+                                         request.status === 'rejected' ? '#dc2626' : '#6b7280'
+                                }}>
+                                  {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+                                </span>
+                              </td>
+                              <td style={{ padding: '1rem' }}>
+                                <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                                  {request.is_requester ? 
+                                    `To: ${request.target_org_name}` : 
+                                    `From: ${request.requester_org_name}`
+                                  }
+                                </div>
+                              </td>
+                              <td style={{ padding: '1rem' }}>
+                                <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                                  {new Date(request.created_at).toLocaleDateString()}
+                                </div>
+                              </td>
+                              <td style={{ padding: '1rem' }}>
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                  {!request.is_requester && request.status === 'pending' && (
+                                    <>
+                                      <button
+                                        onClick={() => handleApproveFileRequest(request.request_id)}
+                                        style={{
+                                          padding: '0.25rem 0.5rem',
+                                          background: '#10b981',
+                                          color: 'white',
+                                          border: 'none',
+                                          borderRadius: '4px',
+                                          cursor: 'pointer',
+                                          fontSize: '0.75rem'
+                                        }}
+                                      >
+                                        Approve
+                                      </button>
+                                      <button
+                                        onClick={() => handleRejectFileRequest(request.request_id)}
+                                        style={{
+                                          padding: '0.25rem 0.5rem',
+                                          background: '#dc2626',
+                                          color: 'white',
+                                          border: 'none',
+                                          borderRadius: '4px',
+                                          cursor: 'pointer',
+                                          fontSize: '0.75rem'
+                                        }}
+                                      >
+                                        Reject
+                                      </button>
+                                    </>
+                                  )}
+                                  {request.status === 'approved' && !request.uploaded_file_id && !request.is_requester && (
+                                    <button
+                                      onClick={() => handleOpenUploadFileModal(request)}
+                                      style={{
+                                        padding: '0.25rem 0.5rem',
+                                        background: '#3b82f6',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        cursor: 'pointer',
+                                        fontSize: '0.75rem'
+                                      }}
+                                    >
+                                      Upload
+                                    </button>
+                                  )}
+                                  {request.uploaded_file_id && (
+                                    <button
+                                      onClick={() => handleViewFile(request.uploaded_file_id)}
+                                      style={{
+                                        padding: '0.25rem 0.5rem',
+                                        background: '#8b5cf6',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        cursor: 'pointer',
+                                        fontSize: '0.75rem'
+                                      }}
+                                    >
+                                      View
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Shared Files Section */}
+              <div>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1rem', color: '#374151' }}>
+                  Shared Files ({sharedFiles.length})
+                </h3>
+                <div style={{ 
+                  background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.95) 100%)',
+                  backdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  borderRadius: '16px',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+                  overflow: 'hidden'
+                }}>
+                  {sharedFiles.length === 0 ? (
+                    <div style={{ 
+                      padding: '2rem', 
+                      textAlign: 'center', 
+                      color: '#6b7280',
+                      background: 'rgba(255, 255, 255, 0.8)'
+                    }}>
+                      <FileText size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                      <div style={{ fontSize: '1rem', fontWeight: '500', marginBottom: '0.5rem' }}>No Shared Files</div>
+                      <div style={{ fontSize: '0.875rem' }}>No files have been shared yet.</div>
+                    </div>
+                  ) : (
+                    <div style={{ overflow: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)' }}>
+                            <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: '600', color: '#374151' }}>File Name</th>
+                            <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: '600', color: '#374151' }}>Description</th>
+                            <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: '600', color: '#374151' }}>Category</th>
+                            <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: '600', color: '#374151' }}>Size</th>
+                            <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: '600', color: '#374151' }}>From/To</th>
+                            <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: '600', color: '#374151' }}>Uploaded</th>
+                            <th style={{ padding: '1rem', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: '600', color: '#374151' }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sharedFiles.map((file) => (
+                            <tr key={file.file_id} style={{ borderBottom: '1px solid rgba(243, 244, 246, 0.8)' }}>
+                              <td style={{ padding: '1rem' }}>
+                                <div style={{ fontSize: '0.875rem', fontWeight: '500', color: '#374151' }}>
+                                  {file.file_name}
+                                </div>
+                              </td>
+                              <td style={{ padding: '1rem' }}>
+                                <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                                  {file.file_description}
+                                </div>
+                              </td>
+                              <td style={{ padding: '1rem' }}>
+                                <span style={{
+                                  padding: '0.25rem 0.5rem',
+                                  borderRadius: '12px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: '500',
+                                  background: '#dbeafe',
+                                  color: '#1e40af'
+                                }}>
+                                  {file.file_category}
+                                </span>
+                              </td>
+                              <td style={{ padding: '1rem' }}>
+                                <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                                  {(file.file_size / 1024 / 1024).toFixed(2)} MB
+                                </div>
+                              </td>
+                              <td style={{ padding: '1rem' }}>
+                                <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                                  {file.is_sender ? 
+                                    `To: ${file.receiver_org_name}` : 
+                                    `From: ${file.sender_org_name}`
+                                  }
+                                </div>
+                              </td>
+                              <td style={{ padding: '1rem' }}>
+                                <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                                  {new Date(file.uploaded_at).toLocaleDateString()}
+                                </div>
+                              </td>
+                              <td style={{ padding: '1rem' }}>
+                                <button
+                                  onClick={() => handleViewFile(file.file_id)}
+                                  style={{
+                                    padding: '0.25rem 0.5rem',
+                                    background: '#8b5cf6',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontSize: '0.75rem'
+                                  }}
+                                >
+                                  View
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -4753,6 +5319,597 @@ export default function OrgDashboard() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* File Request Modal */}
+      {showFileRequestModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '2rem',
+            maxWidth: '600px',
+            width: '90%',
+            maxHeight: '90vh',
+            overflow: 'auto'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '1.5rem'
+            }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>Request File</h2>
+              <button
+                onClick={handleCloseFileRequestModal}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '0.5rem',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {fileSharingError && (
+              <div style={{
+                background: '#fee2e2',
+                color: '#dc2626',
+                padding: '0.75rem',
+                borderRadius: '8px',
+                marginBottom: '1rem',
+                fontSize: '0.875rem'
+              }}>
+                {fileSharingError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateFileRequest}>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Contract *
+                </label>
+                <select
+                  value={fileRequestForm.contract_id}
+                  onChange={(e) => handleFileRequestFormChange('contract_id', e.target.value)}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  <option value="">Select a contract...</option>
+                  {contracts.filter(contract => contract.status === 'active').map((contract) => (
+                    <option key={contract.contract_id} value={contract.contract_id}>
+                      {contract.contract_name} - {contract.target_org_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Target Organization *
+                </label>
+                <select
+                  value={fileRequestForm.target_org_id}
+                  onChange={(e) => handleFileRequestFormChange('target_org_id', e.target.value)}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  <option value="">Select target organization...</option>
+                  {allOrganizations.map((org) => (
+                    <option key={org.org_id} value={org.org_id}>
+                      {org.org_name} ({org.org_id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  File Description *
+                </label>
+                <textarea
+                  value={fileRequestForm.file_description}
+                  onChange={(e) => handleFileRequestFormChange('file_description', e.target.value)}
+                  required
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Describe the file you need and its purpose..."
+                />
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  File Category
+                </label>
+                <select
+                  value={fileRequestForm.file_category}
+                  onChange={(e) => handleFileRequestFormChange('file_category', e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  <option value="contract">Contract</option>
+                  <option value="compliance">Compliance</option>
+                  <option value="financial">Financial</option>
+                  <option value="legal">Legal</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Expiration Date (Optional)
+                </label>
+                <input
+                  type="datetime-local"
+                  value={fileRequestForm.expires_at}
+                  onChange={(e) => handleFileRequestFormChange('expires_at', e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                />
+              </div>
+
+              <div style={{
+                display: 'flex',
+                gap: '1rem',
+                justifyContent: 'flex-end'
+              }}>
+                <button
+                  type="button"
+                  onClick={handleCloseFileRequestModal}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    background: 'white',
+                    color: '#374151',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={fileSharingLoading}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: 'none',
+                    borderRadius: '8px',
+                    background: fileSharingLoading ? '#9ca3af' : '#3b82f6',
+                    color: 'white',
+                    cursor: fileSharingLoading ? 'not-allowed' : 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  {fileSharingLoading ? 'Creating Request...' : 'Create Request'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Upload File Modal */}
+      {showUploadFileModal && selectedFileRequest && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '2rem',
+            maxWidth: '600px',
+            width: '90%',
+            maxHeight: '90vh',
+            overflow: 'auto'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '1.5rem'
+            }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>Upload File</h2>
+              <button
+                onClick={handleCloseUploadFileModal}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '0.5rem',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{
+              background: '#f0f9ff',
+              padding: '1rem',
+              borderRadius: '8px',
+              marginBottom: '1.5rem',
+              border: '1px solid #bae6fd'
+            }}>
+              <h4 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.5rem', color: '#0369a1' }}>
+                File Request Details
+              </h4>
+              <div style={{ fontSize: '0.875rem', color: '#0c4a6e' }}>
+                <p><strong>Description:</strong> {selectedFileRequest.file_description}</p>
+                <p><strong>Category:</strong> {selectedFileRequest.file_category}</p>
+                <p><strong>From:</strong> {selectedFileRequest.requester_org_name}</p>
+              </div>
+            </div>
+
+            {fileSharingError && (
+              <div style={{
+                background: '#fee2e2',
+                color: '#dc2626',
+                padding: '0.75rem',
+                borderRadius: '8px',
+                marginBottom: '1rem',
+                fontSize: '0.875rem'
+              }}>
+                {fileSharingError}
+              </div>
+            )}
+
+            <form onSubmit={handleUploadFile}>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Select PDF File *
+                </label>
+                <input
+                  id="file-upload"
+                  type="file"
+                  accept=".pdf"
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                />
+                <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                  Only PDF files are allowed. Maximum size: 50MB
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  File Description (Optional)
+                </label>
+                <textarea
+                  id="file-description"
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Additional description for the uploaded file..."
+                />
+              </div>
+
+              <div style={{
+                display: 'flex',
+                gap: '1rem',
+                justifyContent: 'flex-end'
+              }}>
+                <button
+                  type="button"
+                  onClick={handleCloseUploadFileModal}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    background: 'white',
+                    color: '#374151',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={fileSharingLoading}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: 'none',
+                    borderRadius: '8px',
+                    background: fileSharingLoading ? '#9ca3af' : '#10b981',
+                    color: 'white',
+                    cursor: fileSharingLoading ? 'not-allowed' : 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  {fileSharingLoading ? 'Uploading...' : 'Upload File'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Direct Share Modal */}
+      {showDirectShareModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '2rem',
+            maxWidth: '600px',
+            width: '90%',
+            maxHeight: '90vh',
+            overflow: 'auto'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '1.5rem'
+            }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>Send File</h2>
+              <button
+                onClick={handleCloseDirectShareModal}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '0.5rem',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {fileSharingError && (
+              <div style={{
+                background: '#fee2e2',
+                color: '#dc2626',
+                padding: '0.75rem',
+                borderRadius: '8px',
+                marginBottom: '1rem',
+                fontSize: '0.875rem'
+              }}>
+                {fileSharingError}
+              </div>
+            )}
+
+            <form onSubmit={handleDirectFileShare}>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Target Organization *
+                </label>
+                <select
+                  value={directShareForm.target_org_id}
+                  onChange={(e) => handleDirectShareFormChange('target_org_id', e.target.value)}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  <option value="">Select target organization...</option>
+                  {allOrganizations.map((org) => (
+                    <option key={org.org_id} value={org.org_id}>
+                      {org.org_name} ({org.org_id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  File Description *
+                </label>
+                <textarea
+                  value={directShareForm.file_description}
+                  onChange={(e) => handleDirectShareFormChange('file_description', e.target.value)}
+                  required
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Describe the file you're sharing..."
+                />
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  File Category
+                </label>
+                <select
+                  value={directShareForm.file_category}
+                  onChange={(e) => handleDirectShareFormChange('file_category', e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  <option value="contract">Contract</option>
+                  <option value="compliance">Compliance</option>
+                  <option value="financial">Financial</option>
+                  <option value="legal">Legal</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Select PDF File *
+                </label>
+                <input
+                  id="direct-share-file"
+                  type="file"
+                  accept=".pdf"
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                />
+                <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                  Only PDF files are allowed. Maximum size: 50MB
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                  Expiration Date (Optional)
+                </label>
+                <input
+                  type="datetime-local"
+                  value={directShareForm.expires_at}
+                  onChange={(e) => handleDirectShareFormChange('expires_at', e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem'
+                  }}
+                />
+              </div>
+
+              <div style={{
+                display: 'flex',
+                gap: '1rem',
+                justifyContent: 'flex-end'
+              }}>
+                <button
+                  type="button"
+                  onClick={handleCloseDirectShareModal}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    background: 'white',
+                    color: '#374151',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={fileSharingLoading}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    border: 'none',
+                    borderRadius: '8px',
+                    background: fileSharingLoading ? '#9ca3af' : '#10b981',
+                    color: 'white',
+                    cursor: fileSharingLoading ? 'not-allowed' : 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  {fileSharingLoading ? 'Sharing...' : 'Share File'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

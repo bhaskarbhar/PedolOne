@@ -373,3 +373,63 @@ class ContractAuditLog(BaseModel):
         populate_by_name=True,
         json_encoders={ObjectId: str}
     )
+
+# --- File Sharing Models ---
+class FileRequest(BaseModel):
+    request_id: str
+    contract_id: str
+    requester_org_id: str
+    requester_org_name: str
+    target_org_id: str
+    target_org_name: str
+    file_description: str
+    file_category: str  # "contract", "compliance", "financial", "legal", "other"
+    status: str  # "pending", "approved", "rejected", "completed"
+    created_at: datetime
+    expires_at: datetime
+    approved_at: Optional[datetime] = None
+    rejected_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
+    uploaded_file_id: Optional[str] = None
+    uploaded_file_name: Optional[str] = None
+    uploaded_file_size: Optional[int] = None
+    uploaded_at: Optional[datetime] = None
+    uploaded_by: Optional[str] = None
+
+class SharedFile(BaseModel):
+    file_id: str
+    contract_id: str
+    sender_org_id: str
+    sender_org_name: str
+    receiver_org_id: str
+    receiver_org_name: str
+    file_name: str
+    file_description: str
+    file_category: str
+    file_size: int
+    file_type: str = "pdf"
+    file_path: str
+    uploaded_at: datetime
+    uploaded_by: str
+    expires_at: datetime
+    access_count: int = 0
+    last_accessed: Optional[datetime] = None
+    is_encrypted: bool = True
+    encryption_key: Optional[str] = None
+
+class CreateFileRequest(BaseModel):
+    contract_id: str
+    target_org_id: str
+    file_description: str
+    file_category: str = "contract"
+    expires_at: Optional[datetime] = None
+
+class UploadFileRequest(BaseModel):
+    file_request_id: str
+    file_description: Optional[str] = None
+
+class DirectFileShare(BaseModel):
+    target_org_id: str
+    file_description: str
+    file_category: str = "contract"
+    expires_at: Optional[datetime] = None

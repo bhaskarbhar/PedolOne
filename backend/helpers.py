@@ -22,6 +22,7 @@ user_pii_collection = db.user_pii
 organizations_collection = db.organizations
 policies_collection = db.policy
 logs_collection = db.logs
+inter_org_contracts_collection = db.inter_org_contracts
 
 FERNET_KEY = os.getenv("FERNET_KEY")
 if not FERNET_KEY:
@@ -252,3 +253,7 @@ async def create_audit_log(log_data: dict, ip_address: str = None) -> None:
         print(f"Error creating audit log: {e}")
         # Fallback: insert without geolocation data
         logs_collection.insert_one(log_data)
+
+def get_database():
+    """Get the database instance"""
+    return db
