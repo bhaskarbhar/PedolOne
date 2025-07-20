@@ -13,7 +13,7 @@ from models import (
     InterOrgContract, CreateInterOrgContract, UpdateInterOrgContract, RespondToContract,
     ContractResource, ContractUpdateRequest, ContractDeletionRequest, ContractActionRequest, ContractVersion, ContractAuditLog
 )
-from helpers import users_collection, policies_collection, logs_collection
+from helpers import users_collection, policies_collection, logs_collection, get_organization_by_id, organizations_collection
 from jwt_utils import get_current_user, TokenData
 from routers.websocket import send_user_update
 
@@ -27,7 +27,6 @@ db = client.get_database("PedolOne")
 
 # Collections
 inter_org_contracts_collection = db.get_collection("inter_org_contracts")
-organizations_collection = db.get_collection("organizations")
 contract_versions_collection = db.get_collection("contract_versions")
 contract_audit_logs_collection = db.get_collection("contract_audit_logs")
 
@@ -36,9 +35,7 @@ inter_org_contracts_collection.create_index([("source_org_id", 1), ("target_org_
 inter_org_contracts_collection.create_index([("approval_status", 1)])
 inter_org_contracts_collection.create_index("ends_at", expireAfterSeconds=0)
 
-def get_organization_by_id(org_id: str):
-    """Get organization by ID"""
-    return organizations_collection.find_one({"org_id": org_id})
+
 
 def generate_resource_signature(resource_name: str, purpose: List[str], retention_window: str, created_at: datetime, ends_at: datetime) -> str:
     """Generate a unique signature for a resource"""
@@ -88,15 +85,30 @@ async def create_inter_org_contract(
 ):
     """Create a new inter-organization contract"""
     
+    print(f"DEBUG: create_inter_org_contract called")
+    print(f"DEBUG: current_user: {current_user}")
+    
     # Verify current user is an organization admin
     user = users_collection.find_one({"userid": current_user.user_id})
-    if not user or user.get("user_type") != "organization":
+    print(f"DEBUG: Found user: {user}")
+    
+    if not user:
+        print(f"DEBUG: User not found for user_id: {current_user.user_id}")
+        raise HTTPException(status_code=403, detail="User not found")
+    
+    if user.get("user_type") != "organization":
+        print(f"DEBUG: User is not organization type: {user.get('user_type')}")
         raise HTTPException(status_code=403, detail="Only organization admins can create contracts")
     
     # Get source organization details
-    source_org = get_organization_by_id(user.get("organization_id"))
+    user_org_id = user.get("organization_id")
+    print(f"DEBUG: User organization_id: {user_org_id}")
+    source_org = get_organization_by_id(user_org_id)
+    print(f"DEBUG: Source organization lookup result: {source_org}")
     if not source_org:
+        print(f"DEBUG: Source organization not found for org_id: {user_org_id}")
         raise HTTPException(status_code=404, detail="Source organization not found")
+    print(f"DEBUG: Source organization found: {source_org.get('org_name')}")
     
     # Get target organization details
     target_org = get_organization_by_id(contract_data.target_org_id)
@@ -209,9 +221,28 @@ async def create_inter_org_contract(
 async def get_organization_contracts(org_id: str, current_user: TokenData = Depends(get_current_user)):
     """Get all contracts for an organization (both sent and received)"""
     
+    print(f"DEBUG: get_organization_contracts called for org_id: {org_id}")
+    print(f"DEBUG: current_user: {current_user}")
+    
+    # Check if collections exist and are accessible
+    try:
+        print(f"DEBUG: Checking if inter_org_contracts_collection exists...")
+        collection_count = inter_org_contracts_collection.count_documents({})
+        print(f"DEBUG: inter_org_contracts_collection has {collection_count} documents")
+    except Exception as e:
+        print(f"DEBUG: Error accessing inter_org_contracts_collection: {e}")
+        raise HTTPException(status_code=500, detail="Database connection error")
+    
     # Verify user is admin of this organization
     user = users_collection.find_one({"userid": current_user.user_id})
-    if not user or user.get("organization_id") != org_id:
+    print(f"DEBUG: Found user: {user}")
+    
+    if not user:
+        print(f"DEBUG: User not found for user_id: {current_user.user_id}")
+        raise HTTPException(status_code=403, detail="User not found")
+    
+    if user.get("organization_id") != org_id:
+        print(f"DEBUG: User org_id ({user.get('organization_id')}) doesn't match requested org_id ({org_id})")
         raise HTTPException(status_code=403, detail="Access denied")
     
     # Get organization details
@@ -602,6 +633,22 @@ async def get_active_contracts(org_id: str, current_user: TokenData = Depends(ge
 @router.get("/contract-types")
 async def get_contract_types():
     """Get available contract types and their configurations"""
+    
+    print(f"DEBUG: get_contract_types called")
+    
+    # Check database connectivity
+    try:
+        print(f"DEBUG: Testing database connectivity...")
+        db_info = inter_org_contracts_collection.database.name
+        print(f"DEBUG: Connected to database: {db_info}")
+        
+        # Test a simple query
+        count = inter_org_contracts_collection.count_documents({})
+        print(f"DEBUG: inter_org_contracts_collection document count: {count}")
+        
+    except Exception as e:
+        print(f"DEBUG: Database connectivity error: {e}")
+        raise HTTPException(status_code=500, detail="Database connection error")
     
     contract_types = [
         {

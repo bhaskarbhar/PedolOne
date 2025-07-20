@@ -9,12 +9,38 @@ import AuditLogTable from '../components/AuditLogTable';
 // Create axios instance with auth token
 const createAxiosInstance = () => {
   const token = localStorage.getItem('token');
-  return axios.create({
+  console.log('DEBUG: Creating axios instance with token:', token ? `${token.substring(0, 20)}...` : 'null');
+  console.log('DEBUG: Full token:', token);
+  
+  if (!token) {
+    console.error('DEBUG: No token found in localStorage!');
+    console.error('DEBUG: localStorage contents:', Object.keys(localStorage));
+    console.error('DEBUG: localStorage.getItem("token"):', localStorage.getItem('token'));
+  }
+  
+  const instance = axios.create({
+    baseURL: 'http://localhost:8000',
     headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json'
     }
   });
+  
+  // Add request interceptor to log all requests
+  instance.interceptors.request.use(
+    (config) => {
+      console.log('DEBUG: Axios request interceptor - URL:', config.url);
+      console.log('DEBUG: Axios request interceptor - Headers:', config.headers);
+      return config;
+    },
+    (error) => {
+      console.error('DEBUG: Axios request interceptor error:', error);
+      return Promise.reject(error);
+    }
+  );
+  
+  console.log('DEBUG: Axios instance headers:', instance.defaults.headers);
+  return instance;
 };
 
 export default function OrgDashboard() {
@@ -248,9 +274,18 @@ export default function OrgDashboard() {
     }
     
     const fetchOrgData = async () => {
+      console.log('DEBUG: fetchOrgData function called');
+      console.log('DEBUG: orgIdToUse:', orgIdToUse);
+      console.log('DEBUG: user:', user);
+      
       try {
         setError(null);
         const orgId = orgIdToUse;
+        
+        // Check token at the beginning
+        const tokenAtStart = localStorage.getItem('token');
+        console.log('DEBUG: Token at start of fetchOrgData:', tokenAtStart ? `${tokenAtStart.substring(0, 20)}...` : 'null');
+        
         const api = createAxiosInstance();
         
         console.log('Fetching data for organization:', orgId);
@@ -269,8 +304,55 @@ export default function OrgDashboard() {
         
 
         
+        // Test token with a simple request first
+        console.log('DEBUG: Testing token with a simple request...');
+        try {
+          const testResponse = await api.get('/auth/me');
+          console.log('DEBUG: Test request successful:', testResponse.status);
+        } catch (testErr) {
+          console.error('DEBUG: Test request failed:', testErr);
+        }
+        
         // Fetch inter-org contracts
-        const contractsResponse = await api.get(`/inter-org-contracts/org/${orgId}`);
+        console.log('DEBUG: About to fetch inter-org contracts for orgId:', orgId);
+        
+        // Check token right before the request
+        const tokenBeforeRequest = localStorage.getItem('token');
+        console.log('DEBUG: Token before inter-org contracts request:', tokenBeforeRequest ? `${tokenBeforeRequest.substring(0, 20)}...` : 'null');
+        
+        // Check if user is still authenticated
+        console.log('DEBUG: Current user state:', user);
+        console.log('DEBUG: User authentication status:', user ? 'authenticated' : 'not authenticated');
+        
+        // Create a fresh axios instance specifically for this request
+        console.log('DEBUG: Creating fresh axios instance for inter-org contracts request');
+        
+        // Force a fresh token retrieval
+        const freshToken = localStorage.getItem('token');
+        console.log('DEBUG: Fresh token retrieved:', freshToken ? `${freshToken.substring(0, 20)}...` : 'null');
+        
+        if (!freshToken) {
+          console.error('DEBUG: No fresh token available for inter-org contracts request');
+          throw new Error('Authentication token not available');
+        }
+        
+        const freshApi = axios.create({
+          baseURL: 'http://localhost:8000',
+          headers: {
+            'Authorization': `Bearer ${freshToken}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        console.log('DEBUG: Fresh API headers:', freshApi.defaults.headers);
+        
+        const contractsResponse = await freshApi.get(`/inter-org-contracts/org/${orgId}`);
+        console.log('DEBUG: Contracts response:', contractsResponse);
+        
+        // Check token after the request
+        const tokenAfterRequest = localStorage.getItem('token');
+        console.log('DEBUG: Token after inter-org contracts request:', tokenAfterRequest ? `${tokenAfterRequest.substring(0, 20)}...` : 'null');
+        
         const allContracts = contractsResponse.data || [];
         setContracts(allContracts);
         
@@ -1766,7 +1848,6 @@ export default function OrgDashboard() {
                 onClick={() => setActiveTab(tab.id)}
                 style={{
                   padding: '1rem 1.5rem',
-                  border: 'none',
                   backgroundColor: activeTab === tab.id ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
                   color: activeTab === tab.id ? '#1e40af' : '#6b7280',
                   cursor: 'pointer',
@@ -5264,9 +5345,7 @@ export default function OrgDashboard() {
                     marginTop: '3rem'
                   }}
                   title="Bulk Data Viewer"
-                  onContextMenu={(e) => e.preventDefault()}
-                  onDragStart={(e) => e.preventDefault()}
-                  onSelectStart={(e) => e.preventDefault()}
+                  
                 />
               </div>
             ) : null}
