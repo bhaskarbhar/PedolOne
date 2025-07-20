@@ -45,9 +45,11 @@ def generate_resource_signature(resource_name: str, purpose: List[str], retentio
     signature_data = f"{resource_name}:{','.join(purpose)}:{retention_window}:{created_at.isoformat()}:{ends_at.isoformat()}"
     return hashlib.sha256(signature_data.encode()).hexdigest()
 
-def log_contract_action(contract_id: str, action_type: str, action_by: int, action_by_org_id: str, 
+async def log_contract_action(contract_id: str, action_type: str, action_by: int, action_by_org_id: str, 
                        action_details: dict, ip_address: str = None, user_agent: str = None):
     """Log contract actions for audit trail"""
+    from helpers import enrich_audit_log_with_location
+    
     log_entry = ContractAuditLog(
         contract_id=contract_id,
         action_type=action_type,
@@ -60,6 +62,10 @@ def log_contract_action(contract_id: str, action_type: str, action_by: int, acti
     )
     # Exclude the id field to let MongoDB generate a new _id
     log_data = log_entry.model_dump(by_alias=True, exclude={"id"})
+    
+    # Enrich with geolocation data
+    log_data = await enrich_audit_log_with_location(log_data, ip_address)
+    
     contract_audit_logs_collection.insert_one(log_data)
 
 def get_client_ip(request: Request) -> str:
@@ -727,7 +733,7 @@ async def update_contract(
     
     # Log the update request
     client_ip = get_client_ip(http_request)
-    log_contract_action(
+    await log_contract_action(
         contract_id=existing_contract["contract_id"],
         action_type="update_requested",
         action_by=current_user.user_id,
@@ -820,7 +826,7 @@ async def request_contract_deletion(
     
     # Log the deletion request
     client_ip = get_client_ip(http_request)
-    log_contract_action(
+    await log_contract_action(
         contract_id=existing_contract["contract_id"],
         action_type="deletion_requested",
         action_by=current_user.user_id,
@@ -926,7 +932,7 @@ async def approve_contract_action(
                     }
                 )
                 
-                log_contract_action(
+                await log_contract_action(
                     contract_id=action_data.contract_id,
                     action_type="update_approved",
                     action_by=current_user.user_id,
@@ -956,7 +962,7 @@ async def approve_contract_action(
                 }
             )
             
-            log_contract_action(
+            await log_contract_action(
                 contract_id=action_data.contract_id,
                 action_type="deletion_approved",
                 action_by=current_user.user_id,
@@ -997,7 +1003,7 @@ async def approve_contract_action(
                 }
             )
             
-            log_contract_action(
+            await log_contract_action(
                 contract_id=action_data.contract_id,
                 action_type="update_rejected",
                 action_by=current_user.user_id,
@@ -1024,7 +1030,7 @@ async def approve_contract_action(
                 }
             )
             
-            log_contract_action(
+            await log_contract_action(
                 contract_id=action_data.contract_id,
                 action_type="deletion_rejected",
                 action_by=current_user.user_id,
@@ -1034,7 +1040,7 @@ async def approve_contract_action(
                 },
                 ip_address=client_ip,
                 user_agent=http_request.headers.get("User-Agent") if http_request else None
-            )
+                )
             
             return {"message": "Contract deletion rejected"}
     
@@ -1121,6 +1127,9 @@ async def get_contract_audit_logs(
             "action_details": log["action_details"],
             "timestamp": log["timestamp"].isoformat(),
             "ip_address": log.get("ip_address"),
+            "region": log.get("region", "Unknown Location"),
+            "country": log.get("country", ""),
+            "city": log.get("city", ""),
             "user_agent": log.get("user_agent")
         })
     

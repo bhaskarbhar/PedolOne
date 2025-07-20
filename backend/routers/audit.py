@@ -35,6 +35,9 @@ async def get_organization_audit_logs(org_id: str):
             "purpose": log.get("purpose"),
             "log_type": log.get("log_type"),
             "ip_address": log.get("ip_address"),
+            "region": log.get("region", "Unknown Location"),
+            "country": log.get("country", ""),
+            "city": log.get("city", ""),
             "data_source": log.get("data_source"),
             "created_at": log.get("created_at"),
         })

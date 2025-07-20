@@ -167,3 +167,88 @@ def get_organization_clients(org_id: str):
             })
     
     return clients
+
+async def enrich_audit_log_with_location(log_data: dict, ip_address: str = None) -> dict:
+    """
+    Enrich audit log data with geolocation information
+    
+    Args:
+        log_data: The audit log data dictionary
+        ip_address: The IP address to resolve
+        
+    Returns:
+        Enriched log data with location information
+    """
+    if not ip_address:
+        return log_data
+        
+    try:
+        from services.geolocation import geolocation_service
+        location_data = await geolocation_service.get_location_from_ip(ip_address)
+        
+        if location_data:
+            log_data["region"] = geolocation_service.get_region_display_name(location_data)
+            log_data["country"] = location_data.get("country", "")
+            log_data["city"] = location_data.get("city", "")
+        else:
+            log_data["region"] = "Unknown Location"
+            log_data["country"] = ""
+            log_data["city"] = ""
+            
+    except Exception as e:
+        # Log error but don't fail the audit log creation
+        print(f"Error enriching audit log with location: {e}")
+        log_data["region"] = "Unknown Location"
+        log_data["country"] = ""
+        log_data["city"] = ""
+        
+    return log_data
+
+def get_client_ip(request) -> str:
+    """
+    Extract client IP from FastAPI request
+    
+    Args:
+        request: FastAPI request object
+        
+    Returns:
+        Client IP address as string
+    """
+    if not request:
+        return "unknown"
+        
+    # Check for forwarded headers first
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+        
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip
+        
+    # Fall back to client host
+    if request.client:
+        return request.client.host
+        
+    return "unknown"
+
+async def create_audit_log(log_data: dict, ip_address: str = None) -> None:
+    """
+    Create an audit log entry with geolocation information
+    
+    Args:
+        log_data: The audit log data dictionary
+        ip_address: The IP address to resolve for location
+    """
+    try:
+        # Enrich with geolocation data
+        enriched_log_data = await enrich_audit_log_with_location(log_data, ip_address)
+        
+        # Insert into database
+        logs_collection.insert_one(enriched_log_data)
+        
+    except Exception as e:
+        # Log error but don't fail the operation
+        print(f"Error creating audit log: {e}")
+        # Fallback: insert without geolocation data
+        logs_collection.insert_one(log_data)

@@ -145,6 +145,9 @@ class LogEntry(BaseModel):
     purpose: list[str]
     log_type: str = "consent"  # "consent" or "data_access"
     ip_address: Optional[str] = None
+    region: Optional[str] = None  # Geographic region from IP address
+    country: Optional[str] = None  # Country from IP address
+    city: Optional[str] = None  # City from IP address
     data_source: str = "individual"  # "individual" or "organization"
     source_org_id: Optional[str] = None  # For inter-org sharing
     target_org_id: Optional[str] = None  # For inter-org sharing
@@ -360,6 +363,9 @@ class ContractAuditLog(BaseModel):
     action_details: dict
     timestamp: datetime
     ip_address: Optional[str] = None
+    region: Optional[str] = None  # Geographic region from IP address
+    country: Optional[str] = None  # Country from IP address
+    city: Optional[str] = None  # City from IP address
     user_agent: Optional[str] = None
     
     model_config = ConfigDict(

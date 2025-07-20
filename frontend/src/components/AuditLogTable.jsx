@@ -101,6 +101,9 @@ const AuditLogTable = ({ logs }) => {
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 IP Address
               </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Location
+              </th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
@@ -148,6 +151,12 @@ const AuditLogTable = ({ logs }) => {
                   <div className="flex items-center text-sm text-gray-600">
                     <Globe size={14} className="mr-2 text-gray-400" />
                     {log.ipAddress}
+                  </div>
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <div className="flex items-center text-sm text-gray-600">
+                    <Globe size={14} className="mr-2 text-blue-400" />
+                    {log.region || 'Unknown Location'}
                   </div>
                 </td>
               </tr>
