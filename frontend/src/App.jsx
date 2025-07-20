@@ -11,26 +11,29 @@ import OrgSignup from './pages/OrgSignup';
 import VerificationSuccess from './pages/VerificationSuccess';
 import Navbar from './components/navbar';
 import Footer from './components/footer';
+import SecurityOverlay from './components/SecurityOverlay';
 
 function App() {
   return (
     <AuthProvider>
-      <div className="min-h-screen flex flex-col w-full">
-      <Navbar />
-        <main className="flex-grow w-full">
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/login/org" element={<OrgLogin />} />
-          <Route path="/login/user" element={<UserLogin />} />
-            <Route path="/signup/user" element={<UserSignup />} />
-            <Route path="/signup/org" element={<OrgSignup />} />
-            <Route path="/dashboard/user" element={<UserDashboard />} />
-            <Route path="/dashboard/org" element={<OrgDashboard />} />
-            <Route path="/verification-success" element={<VerificationSuccess />} />
-        </Routes>
-        </main>
-        <Footer />
-      </div>
+      <SecurityOverlay>
+        <div className="min-h-screen flex flex-col w-full">
+          <Navbar />
+          <main className="flex-grow w-full">
+            <Routes>
+              <Route path="/" element={<LandingPage />} />
+              <Route path="/login/org" element={<OrgLogin />} />
+              <Route path="/login/user" element={<UserLogin />} />
+              <Route path="/signup/user" element={<UserSignup />} />
+              <Route path="/signup/org" element={<OrgSignup />} />
+              <Route path="/dashboard/user" element={<UserDashboard />} />
+              <Route path="/dashboard/org" element={<OrgDashboard />} />
+              <Route path="/verification-success" element={<VerificationSuccess />} />
+            </Routes>
+          </main>
+          <Footer />
+        </div>
+      </SecurityOverlay>
     </AuthProvider>
   );
 }

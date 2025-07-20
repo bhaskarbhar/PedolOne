@@ -270,21 +270,47 @@ export default function OrgDashboard() {
         };
         setContractStats(stats);
         
-        // Fetch audit logs
-        const logsResponse = await api.get(`/policy/org-dashboard/${orgIdToUse}/logs`);
-        const logsArr = Array.isArray(logsResponse.data) ? logsResponse.data : [];
-        const logs = logsArr.map(log => ({
-          id: log._id || log.log_id,
-          date: new Date(log.created_at).toLocaleString(),
-          type: log.log_type || 'consent',
-          dataSource: log.data_source || 'individual',
-          fintechName: log.fintechName || log.fintech_name || 'Unknown',
-          fintechId: log.fintechId || log.fintech_id || '',
-          dataAccessed: log.resource_name?.charAt(0).toUpperCase() + log.resource_name?.slice(1),
-          purpose: Array.isArray(log.purpose) ? log.purpose.join(', ') : log.purpose,
-          ipAddress: log.ip_address || 'N/A'
-        }));
-        setAuditLogs(logs);
+        // Fetch audit logs using enhanced endpoint
+        try {
+          const logsResponse = await api.get(`/audit/org/${orgIdToUse}`);
+          const logsData = logsResponse.data?.logs || logsResponse.data || [];
+          const logs = logsData.map(log => ({
+            id: log.id || log._id || log.log_id,
+            date: log.date || new Date(log.created_at).toLocaleString(),
+            type: log.type || log.log_type || 'consent',
+            dataSource: log.dataSource || log.data_source || 'individual',
+            fintechName: log.fintechName || log.fintech_name || 'Unknown',
+            fintechId: log.fintechId || log.fintech_id || '',
+            dataAccessed: log.dataAccessed || (log.resource_name?.charAt(0).toUpperCase() + log.resource_name?.slice(1)),
+            purpose: log.purpose || (Array.isArray(log.purpose) ? log.purpose.join(', ') : log.purpose),
+            ipAddress: log.ipAddress || log.ip_address || 'N/A',
+            region: log.region || 'Unknown Location'
+          }));
+          setAuditLogs(logs);
+        } catch (auditErr) {
+          console.error('Error fetching audit logs:', auditErr);
+          // Fallback to old endpoint
+          try {
+            const fallbackResponse = await api.get(`/policy/org-dashboard/${orgIdToUse}/logs`);
+            const logsArr = Array.isArray(fallbackResponse.data) ? fallbackResponse.data : [];
+            const logs = logsArr.map(log => ({
+              id: log._id || log.log_id,
+              date: new Date(log.created_at).toLocaleString(),
+              type: log.log_type || 'consent',
+              dataSource: log.data_source || 'individual',
+              fintechName: log.fintechName || log.fintech_name || 'Unknown',
+              fintechId: log.fintechId || log.fintech_id || '',
+              dataAccessed: log.resource_name?.charAt(0).toUpperCase() + log.resource_name?.slice(1),
+              purpose: Array.isArray(log.purpose) ? log.purpose.join(', ') : log.purpose,
+              ipAddress: log.ip_address || 'N/A',
+              region: log.region || 'Unknown Location'
+            }));
+            setAuditLogs(logs);
+          } catch (fallbackErr) {
+            console.error('Error fetching audit logs from fallback endpoint:', fallbackErr);
+            setAuditLogs([]);
+          }
+        }
         
         // Fetch data categories
         const categoriesResponse = await api.get(`/policy/org-dashboard/${orgIdToUse}/data_categories`);
@@ -1402,28 +1428,7 @@ export default function OrgDashboard() {
     }
   };
 
-  const handleDownloadCSV = async (fileId) => {
-    try {
-      const api = createAxiosInstance();
-      const response = await api.get(`/data-requests/download-csv/${fileId}`, {
-        responseType: 'blob'
-      });
-      
-      // Create download link
-      const blob = new Blob([response.data], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `bulk_data_${Date.now()}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error('Error downloading CSV:', err);
-      alert('Failed to download CSV file: ' + (err.response?.data?.detail || err.message));
-    }
-  };
+
 
   if (loading) {
     return (
@@ -1448,26 +1453,76 @@ export default function OrgDashboard() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#f9fafb' }}>
+    <div className="secure-container" style={{ minHeight: '100vh' }}>
       {/* Header */}
-      <div style={{ backgroundColor: 'white', borderBottom: '1px solid #e5e7eb', padding: '2rem' }}>
+      <div className="secure-card" style={{ 
+        margin: '1rem', 
+        padding: '2rem',
+        background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.95) 100%)',
+        backdropFilter: 'blur(10px)',
+        border: '1px solid rgba(255, 255, 255, 0.2)',
+        borderRadius: '16px',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
+      }}>
         <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <h1 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#111827', margin: 0, marginBottom: '0.5rem' }}>
+              <h1 style={{ 
+                fontSize: '2rem', 
+                fontWeight: 'bold', 
+                background: 'linear-gradient(135deg, #1e40af 0%, #3b82f6 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                margin: 0, 
+                marginBottom: '0.5rem' 
+              }}>
                 Welcome to your Organization Dashboard, {user?.username}
               </h1>
-              <p style={{ color: '#6b7280', fontSize: '1rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <p style={{ 
+                color: '#6b7280', 
+                fontSize: '1rem', 
+                margin: 0, 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '0.5rem',
+                padding: '0.5rem 1rem',
+                background: 'rgba(59, 130, 246, 0.1)',
+                borderRadius: '8px',
+                border: '1px solid rgba(59, 130, 246, 0.2)'
+              }}>
                 <Building2 size={20} />
-                Organization ID: <span style={{ fontWeight: '500' }}>{user?.organization_id}</span>
+                Organization ID: <span style={{ fontWeight: '600', color: '#1e40af' }}>{user?.organization_id}</span>
               </p>
+            </div>
+            <div style={{ 
+              padding: '0.75rem 1.5rem', 
+              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+              borderRadius: '8px',
+              color: 'white',
+              fontSize: '0.875rem',
+              fontWeight: '600',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}>
+              <span>🔒</span>
+              Secure Session Active
             </div>
           </div>
         </div>
       </div>
           {/* Tab Navigation */}
-      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem 2rem 0 2rem' }}>
-        <div style={{ borderBottom: '1px solid #e5e7eb', display: 'flex', backgroundColor: '#f9fafb' }}>
+      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '1rem 2rem 0 2rem' }}>
+        <div className="secure-card" style={{ 
+          display: 'flex', 
+          background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(248, 250, 252, 0.9) 100%)',
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(255, 255, 255, 0.2)',
+          borderRadius: '12px',
+          padding: '0.5rem',
+          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.1)',
+          overflow: 'hidden'
+        }}>
           {tabs.map(tab => (
               <button
                 key={tab.id}
@@ -1475,25 +1530,47 @@ export default function OrgDashboard() {
                 style={{
                   padding: '1rem 1.5rem',
                   border: 'none',
-                  backgroundColor: activeTab === tab.id ? 'white' : 'transparent',
-                  color: activeTab === tab.id ? '#2563eb' : '#6b7280',
+                  backgroundColor: activeTab === tab.id ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+                  color: activeTab === tab.id ? '#1e40af' : '#6b7280',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '0.5rem',
                   fontSize: '0.875rem',
-                  fontWeight: '500',
-                  borderBottom: activeTab === tab.id ? '2px solid #2563eb' : '2px solid transparent',
-                  transition: 'all 0.2s'
+                  fontWeight: '600',
+                  borderRadius: '8px',
+                  transition: 'all 0.3s ease',
+                  border: activeTab === tab.id ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid transparent',
+                  position: 'relative',
+                  overflow: 'hidden'
                 }}
               >
-                {tab.icon}
-                {tab.label}
+                {activeTab === tab.id && (
+                  <div style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(37, 99, 235, 0.1) 100%)',
+                    zIndex: 0
+                  }} />
+                )}
+                <span style={{ position: 'relative', zIndex: 1 }}>{tab.icon}</span>
+                <span style={{ position: 'relative', zIndex: 1 }}>{tab.label}</span>
               </button>
             ))}
           </div>
           {/* Tab Content */}
-          <div style={{ padding: '2rem' }}>
+          <div className="secure-card" style={{ 
+            padding: '2rem', 
+            margin: '1rem 0',
+            background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.95) 100%)',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+            borderRadius: '16px',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
+          }}>
             {activeTab === 'overview' && (
               <div>
               <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1.5rem' }}>Organization Overview</h2>
@@ -2556,17 +2633,47 @@ export default function OrgDashboard() {
             </div>
           )}
           {activeTab === 'audit_logs' && (
-              <div>
-              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1.5rem' }}>Audit Logs</h2>
-              <div style={{ background: 'white', borderRadius: '12px', padding: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                <Shield size={24} style={{ color: '#3b82f6' }} />
+                <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>Audit Logs</h2>
+                <div style={{ 
+                  padding: '0.25rem 0.75rem', 
+                  background: 'rgba(59, 130, 246, 0.1)', 
+                  color: '#3b82f6', 
+                  borderRadius: '12px', 
+                  fontSize: '0.75rem', 
+                  fontWeight: '600' 
+                }}>
+                  Security & Compliance
+                </div>
+              </div>
+              
+              <div style={{ 
+                background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.95) 100%)',
+                backdropFilter: 'blur(10px)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: '16px',
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+                overflow: 'hidden'
+              }}>
                 {!Array.isArray(auditLogs) || auditLogs.length === 0 ? (
-                  <div style={{ color: '#d97706' }}>No audit logs found for this organization.</div>
+                  <div style={{ 
+                    padding: '2rem', 
+                    textAlign: 'center', 
+                    color: '#6b7280',
+                    background: 'rgba(255, 255, 255, 0.8)'
+                  }}>
+                    <Shield size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                    <div style={{ fontSize: '1rem', fontWeight: '500', marginBottom: '0.5rem' }}>No Audit Logs Found</div>
+                    <div style={{ fontSize: '0.875rem' }}>No audit logs have been generated for this organization yet.</div>
+                  </div>
                 ) : (
                   <AuditLogTable logs={auditLogs} />
                 )}
               </div>
-              </div>
-            )}
+            </div>
+          )}
           {activeTab === 'data_categories' && (
               <div>
               <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1.5rem' }}>Data Categories</h2>
@@ -4509,21 +4616,14 @@ export default function OrgDashboard() {
 
       {/* Bulk Data Modal */}
       {showBulkDataModal && (
-        <div style={{
+        <div className="secure-modal" style={{
           position: 'fixed',
           top: 0,
           left: 0,
           right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
+          bottom: 0
         }}>
-          <div style={{
-            background: 'white',
-            borderRadius: '12px',
+          <div className="secure-modal-content" style={{
             padding: '2rem',
             maxWidth: '90vw',
             maxHeight: '90vh',
@@ -4551,26 +4651,6 @@ export default function OrgDashboard() {
               <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#059669' }}>
                 🔒 Secure CSV Data Viewer
               </h2>
-              {bulkDataUrl && (
-                <button
-                  onClick={() => handleDownloadCSV(bulkDataFileId)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    background: '#059669',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    padding: '0.5rem 1rem',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    fontWeight: '500'
-                  }}
-                >
-                  📥 Download CSV
-                </button>
-              )}
             </div>
             
             {bulkDataLoading ? (
@@ -4589,19 +4669,24 @@ export default function OrgDashboard() {
               </div>
             ) : bulkDataUrl ? (
               <div style={{ height: '70vh', position: 'relative' }}>
-                <div style={{
+                <div className="security-warning" style={{
                   position: 'absolute',
                   top: 0,
                   left: 0,
                   right: 0,
-                  background: '#fef3c7',
-                  padding: '0.75rem',
-                  borderBottom: '1px solid #f59e0b',
+                  padding: '1rem',
                   fontSize: '0.875rem',
-                  color: '#92400e',
-                  zIndex: 10
+                  zIndex: 10,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
                 }}>
-                  <strong>⚠️ SECURITY NOTICE:</strong> This is a read-only view. Copying, downloading, or editing is disabled for data protection.
+                  <span style={{ fontSize: '1.2rem' }}>⚠️</span>
+                  <div>
+                    <strong>SECURITY NOTICE:</strong> This is a read-only view. Copying, downloading, or editing is disabled for data protection.
+                    <br />
+                    <small style={{ opacity: 0.8 }}>Screenshots and screen recording are also prevented for enhanced security.</small>
+                  </div>
                 </div>
                 
                 <iframe
@@ -4620,24 +4705,53 @@ export default function OrgDashboard() {
               </div>
             ) : null}
             
-            <div style={{ 
+            <div className="secure-card" style={{ 
               marginTop: '1rem', 
-              padding: '1rem', 
-              background: '#f0f9ff', 
-              borderRadius: '8px', 
+              padding: '1.5rem', 
+              background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
+              borderRadius: '12px', 
               border: '1px solid #bae6fd',
               fontSize: '0.875rem',
               color: '#0c4a6e'
             }}>
-              <strong>Data Protection Features:</strong>
-              <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
-                <li>🔒 Encrypted data transmission</li>
-                <li>🚫 No copy/paste functionality</li>
-                <li>🚫 No download capability</li>
-                <li>🚫 No editing permissions</li>
-                <li>📊 Read-only CSV viewer</li>
-                <li>⏰ Automatic session timeout</li>
-              </ul>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                <span style={{ fontSize: '1.2rem' }}>🛡️</span>
+                <strong style={{ fontSize: '1rem' }}>Advanced Data Protection Features</strong>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>🔒</span>
+                  <span>End-to-end encryption</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>🚫</span>
+                  <span>Screenshot prevention</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>🚫</span>
+                  <span>Copy/paste disabled</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>🚫</span>
+                  <span>Download blocked</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>📊</span>
+                  <span>Read-only viewer</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>⏰</span>
+                  <span>Auto session timeout</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>🔐</span>
+                  <span>Developer tools blocked</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>🛡️</span>
+                  <span>Print prevention</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

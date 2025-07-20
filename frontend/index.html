@@ -6,9 +6,201 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
     <meta name="description" content="PedolOne - Privacy-first data vaulting, controlled sharing, and airtight compliance for fintech." />
     <title>PedolOne - Secure. Share. Comply.</title>
+    
+    <!-- Security Headers -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+    <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
+    <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=()">
+    
+    <!-- Screenshot Prevention -->
+    <style>
+      /* Prevent screenshots on some browsers */
+      * {
+        -webkit-user-select: none !important;
+        -moz-user-select: none !important;
+        -ms-user-select: none !important;
+        user-select: none !important;
+        -webkit-touch-callout: none !important;
+        -webkit-tap-highlight-color: transparent !important;
+      }
+      
+      /* Allow text selection in inputs */
+      input, textarea, [contenteditable="true"] {
+        -webkit-user-select: text !important;
+        -moz-user-select: text !important;
+        -ms-user-select: text !important;
+        user-select: text !important;
+      }
+    </style>
+    
+    <!-- Screenshot Prevention Script -->
+    <script>
+      // Prevent screenshots and screen recording
+      (function() {
+        'use strict';
+        
+        // Disable right-click context menu
+        document.addEventListener('contextmenu', function(e) {
+          e.preventDefault();
+          return false;
+        });
+        
+        // Disable keyboard shortcuts for copy, save, print, screenshot
+        document.addEventListener('keydown', function(e) {
+          // Prevent Ctrl/Cmd + C (copy)
+          if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+            e.preventDefault();
+            return false;
+          }
+          
+          // Prevent Ctrl/Cmd + S (save)
+          if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+            e.preventDefault();
+            return false;
+          }
+          
+          // Prevent Ctrl/Cmd + P (print)
+          if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+            e.preventDefault();
+            return false;
+          }
+          
+          // Prevent Print Screen key
+          if (e.key === 'PrintScreen' || e.keyCode === 44) {
+            e.preventDefault();
+            return false;
+          }
+          
+          // Prevent F12 (developer tools)
+          if (e.key === 'F12' || e.keyCode === 123) {
+            e.preventDefault();
+            return false;
+          }
+          
+          // Prevent Ctrl/Cmd + Shift + I (developer tools)
+          if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'I') {
+            e.preventDefault();
+            return false;
+          }
+          
+          // Prevent Ctrl/Cmd + Shift + C (developer tools)
+          if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {
+            e.preventDefault();
+            return false;
+          }
+          
+          // Prevent Ctrl/Cmd + Shift + J (developer tools)
+          if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'J') {
+            e.preventDefault();
+            return false;
+          }
+          
+          // Prevent Ctrl/Cmd + U (view source)
+          if ((e.ctrlKey || e.metaKey) && e.key === 'u') {
+            e.preventDefault();
+            return false;
+          }
+        });
+        
+        // Disable drag and drop
+        document.addEventListener('dragstart', function(e) {
+          e.preventDefault();
+          return false;
+        });
+        
+        // Disable text selection
+        document.addEventListener('selectstart', function(e) {
+          e.preventDefault();
+          return false;
+        });
+        
+        // Disable copy events
+        document.addEventListener('copy', function(e) {
+          e.preventDefault();
+          return false;
+        });
+        
+        // Disable cut events
+        document.addEventListener('cut', function(e) {
+          e.preventDefault();
+          return false;
+        });
+        
+        // Disable paste events (except in inputs)
+        document.addEventListener('paste', function(e) {
+          if (!e.target.matches('input, textarea, [contenteditable="true"]')) {
+            e.preventDefault();
+            return false;
+          }
+        });
+        
+        // Prevent iframe embedding
+        if (window.self !== window.top) {
+          window.top.location = window.self.location;
+        }
+        
+        // Disable developer tools detection
+        function detectDevTools() {
+          const threshold = 160;
+          const widthThreshold = window.outerWidth - window.innerWidth > threshold;
+          const heightThreshold = window.outerHeight - window.innerHeight > threshold;
+          
+          if (widthThreshold || heightThreshold) {
+            document.body.innerHTML = '<div style="text-align: center; padding: 50px; font-family: Arial, sans-serif;"><h1>🔒 Security Alert</h1><p>Developer tools are not allowed for security reasons.</p><p>Please close developer tools and refresh the page.</p></div>';
+          }
+        }
+        
+        // Check for developer tools periodically
+        setInterval(detectDevTools, 1000);
+        
+        // Disable print
+        window.addEventListener('beforeprint', function(e) {
+          e.preventDefault();
+          return false;
+        });
+        
+        // Prevent screen capture on some browsers
+        if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+          navigator.mediaDevices.getDisplayMedia = function() {
+            return Promise.reject(new Error('Screen sharing is not allowed'));
+          };
+        }
+        
+        // Disable webcam and microphone access
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          navigator.mediaDevices.getUserMedia = function() {
+            return Promise.reject(new Error('Camera and microphone access is not allowed'));
+          };
+        }
+        
+        // Prevent console access
+        console.log = function() {};
+        console.warn = function() {};
+        console.error = function() {};
+        console.info = function() {};
+        
+        // Disable alert, confirm, prompt
+        window.alert = function() {};
+        window.confirm = function() { return false; };
+        window.prompt = function() { return null; };
+        
+        // Prevent access to localStorage and sessionStorage for sensitive data
+        const originalSetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function(key, value) {
+          if (key.toLowerCase().includes('password') || key.toLowerCase().includes('token') || key.toLowerCase().includes('secret')) {
+            console.warn('Sensitive data storage prevented');
+            return;
+          }
+          return originalSetItem.call(this, key, value);
+        };
+        
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-  </body>
+  </body>
 </html>

@@ -548,98 +548,310 @@ async def view_csv_file(
         <html>
         <head>
             <title>Secure CSV Viewer</title>
+            <meta http-equiv="X-Content-Type-Options" content="nosniff">
+            <meta http-equiv="X-Frame-Options" content="DENY">
+            <meta http-equiv="X-XSS-Protection" content="1; mode=block">
             <style>
+                * {{
+                    -webkit-user-select: none !important;
+                    -moz-user-select: none !important;
+                    -ms-user-select: none !important;
+                    user-select: none !important;
+                    -webkit-touch-callout: none !important;
+                    -webkit-tap-highlight-color: transparent !important;
+                    -webkit-user-drag: none !important;
+                    -khtml-user-drag: none !important;
+                    -moz-user-drag: none !important;
+                    -o-user-drag: none !important;
+                    user-drag: none !important;
+                }}
+                
                 body {{ 
-                    font-family: Arial, sans-serif; 
-                    margin: 20px;
-                    user-select: none;
-                    -webkit-user-select: none;
-                    -moz-user-select: none;
-                    -ms-user-select: none;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+                    margin: 0;
+                    padding: 20px;
+                    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+                    min-height: 100vh;
+                    position: relative;
+                    overflow-x: hidden;
                 }}
+                
                 .secure-header {{
-                    background: #f8f9fa;
-                    padding: 15px;
-                    border-radius: 8px;
+                    background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.95) 100%);
+                    backdrop-filter: blur(10px);
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border-radius: 16px;
+                    padding: 20px;
                     margin-bottom: 20px;
-                    border-left: 4px solid #dc3545;
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+                    position: relative;
+                    overflow: hidden;
                 }}
+                
+                .secure-header::before {{
+                    content: '';
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 4px;
+                    height: 100%;
+                    background: linear-gradient(135deg, #dc3545 0%, #b91c1c 100%);
+                }}
+                
                 .secure-header h2 {{
                     color: #dc3545;
-                    margin: 0;
+                    margin: 0 0 15px 0;
+                    font-size: 1.5rem;
+                    font-weight: 700;
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
                 }}
+                
                 .secure-header p {{
-                    margin: 5px 0;
+                    margin: 8px 0;
                     color: #6c757d;
+                    font-size: 0.9rem;
                 }}
+                
+                .security-warning {{
+                    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+                    border: 1px solid #f59e0b;
+                    border-radius: 8px;
+                    padding: 12px 16px;
+                    color: #92400e;
+                    font-weight: 600;
+                    margin-top: 15px;
+                    position: relative;
+                    overflow: hidden;
+                }}
+                
+                .security-warning::before {{
+                    content: '';
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 4px;
+                    height: 100%;
+                    background: #f59e0b;
+                }}
+                
+                .secure-table-container {{
+                    background: rgba(255, 255, 255, 0.95);
+                    backdrop-filter: blur(10px);
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border-radius: 16px;
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+                    overflow: hidden;
+                    position: relative;
+                }}
+                
                 table {{
                     width: 100%;
                     border-collapse: collapse;
-                    background: white;
+                    background: transparent;
                 }}
+                
                 th, td {{
-                    border: 1px solid #dee2e6;
-                    padding: 8px 12px;
+                    border: 1px solid rgba(226, 232, 240, 0.8);
+                    padding: 12px 16px;
                     text-align: left;
+                    font-size: 0.9rem;
                 }}
+                
                 th {{
-                    background-color: #f8f9fa;
+                    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+                    font-weight: 600;
+                    color: #374151;
+                    border-bottom: 2px solid #e5e7eb;
+                }}
+                
+                td {{
+                    color: #4b5563;
+                    background: rgba(255, 255, 255, 0.8);
+                }}
+                
+                tr:hover td {{
+                    background: rgba(59, 130, 246, 0.05);
+                }}
+                
+                .security-watermark {{
+                    position: fixed;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%) rotate(-45deg);
+                    font-size: 2rem;
                     font-weight: bold;
-                }}
-                .no-select {{
-                    -webkit-touch-callout: none;
-                    -webkit-user-select: none;
-                    -khtml-user-select: none;
-                    -moz-user-select: none;
-                    -ms-user-select: none;
+                    color: rgba(0, 0, 0, 0.02);
+                    pointer-events: none;
+                    z-index: 1;
+                    white-space: nowrap;
                     user-select: none;
                 }}
-                .no-copy {{
-                    -webkit-user-select: none;
-                    -moz-user-select: none;
-                    -ms-user-select: none;
-                    user-select: none;
+                
+                @media print {{
+                    * {{
+                        display: none !important;
+                    }}
                 }}
             </style>
         </head>
-        <body class="no-select">
+        <body>
+            <div class="security-watermark">PEDOLONE SECURE CSV VIEWER</div>
+            
             <div class="secure-header">
                 <h2>🔒 Secure CSV Viewer</h2>
                 <p><strong>File:</strong> {file_metadata['original_filename']}</p>
                 <p><strong>Created:</strong> {file_metadata['created_at'].strftime('%Y-%m-%d %H:%M:%S')}</p>
                 <p><strong>Expires:</strong> {file_metadata['expires_at'].strftime('%Y-%m-%d %H:%M:%S')}</p>
                 <p><strong>Records:</strong> {file_metadata.get('record_count', 'Unknown')}</p>
-                <p style="color: #dc3545; font-weight: bold;">⚠️ This file is view-only. Download, copy, and editing are disabled.</p>
+                
+                <div class="security-warning">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <span>⚠️</span>
+                        <strong>SECURITY NOTICE</strong>
+                    </div>
+                    <div style="font-size: 0.85rem;">
+                        This file is view-only. Download, copy, editing, and screenshots are disabled for data protection.
+                    </div>
+                </div>
             </div>
-            <div class="no-copy">
+            
+            <div class="secure-table-container">
                 {html_content}
             </div>
+            
             <script>
-                // Disable right-click context menu
-                document.addEventListener('contextmenu', function(e) {{
-                    e.preventDefault();
-                    return false;
-                }});
-                
-                // Disable keyboard shortcuts for copy, save, print
-                document.addEventListener('keydown', function(e) {{
-                    if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 's' || e.key === 'p')) {{
+                // Comprehensive screenshot prevention
+                (function() {{
+                    'use strict';
+                    
+                    // Disable right-click context menu
+                    document.addEventListener('contextmenu', function(e) {{
                         e.preventDefault();
                         return false;
+                    }});
+                    
+                    // Disable keyboard shortcuts for copy, save, print, screenshot
+                    document.addEventListener('keydown', function(e) {{
+                        // Prevent Ctrl/Cmd + C (copy)
+                        if ((e.ctrlKey || e.metaKey) && e.key === 'c') {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent Ctrl/Cmd + S (save)
+                        if ((e.ctrlKey || e.metaKey) && e.key === 's') {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent Ctrl/Cmd + P (print)
+                        if ((e.ctrlKey || e.metaKey) && e.key === 'p') {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent Print Screen key
+                        if (e.key === 'PrintScreen' || e.keyCode === 44) {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent F12 (developer tools)
+                        if (e.key === 'F12' || e.keyCode === 123) {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent Ctrl/Cmd + Shift + I (developer tools)
+                        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'I') {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent Ctrl/Cmd + Shift + C (developer tools)
+                        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent Ctrl/Cmd + Shift + J (developer tools)
+                        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'J') {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent Ctrl/Cmd + U (view source)
+                        if ((e.ctrlKey || e.metaKey) && e.key === 'u') {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                    }});
+                    
+                    // Disable drag and drop
+                    document.addEventListener('dragstart', function(e) {{
+                        e.preventDefault();
+                        return false;
+                    }});
+                    
+                    // Disable text selection
+                    document.addEventListener('selectstart', function(e) {{
+                        e.preventDefault();
+                        return false;
+                    }});
+                    
+                    // Disable copy events
+                    document.addEventListener('copy', function(e) {{
+                        e.preventDefault();
+                        return false;
+                    }});
+                    
+                    // Disable cut events
+                    document.addEventListener('cut', function(e) {{
+                        e.preventDefault();
+                        return false;
+                    }});
+                    
+                    // Prevent iframe embedding
+                    if (window.self !== window.top) {{
+                        window.top.location = window.self.location;
                     }}
-                }});
-                
-                // Disable drag and drop
-                document.addEventListener('dragstart', function(e) {{
-                    e.preventDefault();
-                    return false;
-                }});
-                
-                // Disable text selection
-                document.addEventListener('selectstart', function(e) {{
-                    e.preventDefault();
-                    return false;
-                }});
+                    
+                    // Disable developer tools detection
+                    function detectDevTools() {{
+                        const threshold = 160;
+                        const widthThreshold = window.outerWidth - window.innerWidth > threshold;
+                        const heightThreshold = window.outerHeight - window.innerHeight > threshold;
+                        
+                        if (widthThreshold || heightThreshold) {{
+                            document.body.innerHTML = '<div style="text-align: center; padding: 50px; font-family: Arial, sans-serif; background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); color: white; min-height: 100vh; display: flex; align-items: center; justify-content: center;"><div><h1>🔒 Security Alert</h1><p>Developer tools are not allowed for security reasons.</p><p>Please close developer tools and refresh the page.</p></div></div>';
+                        }}
+                    }}
+                    
+                    // Check for developer tools periodically
+                    setInterval(detectDevTools, 1000);
+                    
+                    // Disable print
+                    window.addEventListener('beforeprint', function(e) {{
+                        e.preventDefault();
+                        return false;
+                    }});
+                    
+                    // Prevent screen capture on some browsers
+                    if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {{
+                        navigator.mediaDevices.getDisplayMedia = function() {{
+                            return Promise.reject(new Error('Screen sharing is not allowed'));
+                        }};
+                    }}
+                    
+                    // Disable console access
+                    console.log = function() {{}};
+                    console.warn = function() {{}};
+                    console.error = function() {{}};
+                    console.info = function() {{}};
+                    
+                }})();
             </script>
         </body>
         </html>
@@ -1933,4 +2145,5 @@ async def download_csv_file(
         }
     )
 
+ 
  
