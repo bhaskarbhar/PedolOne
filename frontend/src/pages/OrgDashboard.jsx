@@ -188,9 +188,10 @@ export default function OrgDashboard() {
 
   // Add state for bulk data viewing
   const [showBulkDataModal, setShowBulkDataModal] = useState(false);
+  const [bulkDataUrl, setBulkDataUrl] = useState("");
+  const [bulkDataFileId, setBulkDataFileId] = useState("");
   const [bulkDataLoading, setBulkDataLoading] = useState(false);
   const [bulkDataError, setBulkDataError] = useState("");
-  const [bulkDataUrl, setBulkDataUrl] = useState("");
 
   // Fetch contract logs when orgIdToUse changes
   useEffect(() => {
@@ -426,12 +427,12 @@ export default function OrgDashboard() {
   };
 
   const handleApproveBulkRequest = async (bulkRequestId) => {
-    if (confirm('Are you sure you want to approve this bulk data request? This will generate an encrypted Excel file with all the requested data.')) {
+    if (confirm('Are you sure you want to approve this bulk data request? This will generate an encrypted CSV file with all the requested data.')) {
       try {
         const api = createAxiosInstance();
         const response = await api.post(`/data-requests/approve-bulk-request/${bulkRequestId}`);
         
-        alert(`Bulk request approved successfully! ${response.data.approved_requests} requests approved. Excel file generated with ${response.data.record_count} records.`);
+        alert(`Bulk request approved successfully! ${response.data.approved_requests} requests approved. CSV file generated with ${response.data.record_count} records.`);
         window.location.reload();
           } catch (err) {
       console.error('Error approving bulk request:', err);
@@ -1370,14 +1371,15 @@ export default function OrgDashboard() {
     setShowBulkDataModal(true);
     setBulkDataLoading(true);
     setBulkDataError("");
+    setBulkDataFileId(fileId);
     
     try {
       const api = createAxiosInstance();
-      const response = await api.get(`/data-requests/view-excel/${fileId}`);
+      const response = await api.get(`/data-requests/view-csv/${fileId}`);
       
-      // Create a blob URL for the Excel file
+      // Create a blob URL for the CSV file
       const blob = new Blob([response.data], { 
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+        type: 'text/html' 
       });
       const url = URL.createObjectURL(blob);
       setBulkDataUrl(url);
@@ -1393,9 +1395,33 @@ export default function OrgDashboard() {
   const handleCloseBulkDataModal = () => {
     setShowBulkDataModal(false);
     setBulkDataError("");
+    setBulkDataFileId("");
     if (bulkDataUrl) {
       URL.revokeObjectURL(bulkDataUrl);
       setBulkDataUrl("");
+    }
+  };
+
+  const handleDownloadCSV = async (fileId) => {
+    try {
+      const api = createAxiosInstance();
+      const response = await api.get(`/data-requests/download-csv/${fileId}`, {
+        responseType: 'blob'
+      });
+      
+      // Create download link
+      const blob = new Blob([response.data], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `bulk_data_${Date.now()}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error downloading CSV:', err);
+      alert('Failed to download CSV file: ' + (err.response?.data?.detail || err.message));
     }
   };
 
@@ -1752,13 +1778,13 @@ export default function OrgDashboard() {
                             const response = await api.get(`/data-requests/bulk-approved-data/${orgIdToUse}`);
                             
                             if (response.data && response.data.file_id) {
-                              // Open the encrypted Excel file in web viewer
-                              const viewUrl = `${api.defaults.baseURL}/data-requests/view-excel/${response.data.file_id}`;
+                              // Open the encrypted CSV file in web viewer
+                              const viewUrl = `${api.defaults.baseURL}/data-requests/view-csv/${response.data.file_id}`;
                               window.open(viewUrl, '_blank', 'noopener,noreferrer');
                             }
                           } catch (err) {
-                            console.error('Error generating Excel file:', err);
-                            alert('Failed to generate Excel file: ' + (err.response?.data?.detail || err.message));
+                            console.error('Error generating CSV file:', err);
+                            alert('Failed to generate CSV file: ' + (err.response?.data?.detail || err.message));
                           }
                         }}
                         style={{
@@ -1776,7 +1802,7 @@ export default function OrgDashboard() {
                         }}
                       >
                         <FileText size={16} />
-                        View Excel
+                        View CSV
                       </button>
                     )}
                   </div>
@@ -2006,10 +2032,10 @@ export default function OrgDashboard() {
                                   marginLeft: '0.5rem'
                                 }}
                                 onClick={() => {
-                                  if (req.is_bulk_request && req.excel_file_id) {
-                                    handleViewBulkData(req.excel_file_id);
+                                  if (req.is_bulk_request && req.csv_file_id) {
+                                    handleViewBulkData(req.csv_file_id);
                                   } else if (req.is_bulk_request) {
-                                    // For bulk requests without excel_file_id, generate it
+                                    // For bulk requests without csv_file_id, generate it
                                     alert('Bulk data export not available yet. Please contact the target organization to approve the request.');
                                   } else {
                                     handleViewApprovedData(req.request_id);
@@ -4468,7 +4494,7 @@ export default function OrgDashboard() {
               <div style={{ fontSize: '0.875rem', color: '#0c4a6e' }}>
                 <p style={{ marginBottom: '0.5rem' }}>
                   This will create individual data requests for each selected user. When approved, 
-                  the data will be shared through the standard data request process.
+                  the data will be shared through a secure CSV file with detokenized PII data.
                 </p>
                 <p style={{ marginBottom: 0 }}>
                   <strong>Selected:</strong> {selectedUsersForBulk.length} users | 
@@ -4521,9 +4547,31 @@ export default function OrgDashboard() {
               <X size={20} />
             </button>
             
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1.5rem', color: '#059669' }}>
-              🔒 Secure Bulk Data Viewer
-            </h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#059669' }}>
+                🔒 Secure CSV Data Viewer
+              </h2>
+              {bulkDataUrl && (
+                <button
+                  onClick={() => handleDownloadCSV(bulkDataFileId)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    background: '#059669',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '0.5rem 1rem',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  📥 Download CSV
+                </button>
+              )}
+            </div>
             
             {bulkDataLoading ? (
               <div style={{ textAlign: 'center', padding: '2rem' }}>
@@ -4587,7 +4635,7 @@ export default function OrgDashboard() {
                 <li>🚫 No copy/paste functionality</li>
                 <li>🚫 No download capability</li>
                 <li>🚫 No editing permissions</li>
-                <li>📊 Read-only Excel viewer</li>
+                <li>📊 Read-only CSV viewer</li>
                 <li>⏰ Automatic session timeout</li>
               </ul>
             </div>

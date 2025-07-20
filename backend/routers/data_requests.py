@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import csv
 from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File, Form
 from datetime import datetime, timedelta
 from fastapi.encoders import jsonable_encoder
@@ -8,7 +9,7 @@ from pymongo import MongoClient
 from dotenv import load_dotenv
 from typing import List, Optional
 from pydantic import BaseModel
-import pandas as pd
+from fastapi.responses import FileResponse
 import io
 from cryptography.fernet import Fernet
 import base64
@@ -40,13 +41,6 @@ data_requests_collection.create_index([("target_user_id", 1), ("status", 1)])
 data_requests_collection.create_index([("requester_org_id", 1), ("status", 1)])
 
 # Add new models for bulk requests
-class BulkDataRequest(BaseModel):
-    target_org_id: str
-    excel_file_id: str
-    purpose: List[str]
-    retention_window: str = "30 days"
-    request_message: Optional[str] = None
-
 class CreateBulkDataRequest(BaseModel):
     target_org_id: str
     selected_users: List[int]  # List of user IDs
@@ -55,17 +49,18 @@ class CreateBulkDataRequest(BaseModel):
     retention_window: str = "30 days"
     request_message: Optional[str] = None
 
-class ExcelFileMetadata(BaseModel):
+class CSVFileMetadata(BaseModel):
     file_id: str
     original_filename: str
-    encrypted_content: str
+    file_path: str
     access_policy: dict
-    uploaded_by: int
-    uploaded_at: datetime
+    created_by: int
+    created_at: datetime
     expires_at: datetime
+    bulk_request_id: Optional[str] = None
 
-# Create a new collection for Excel files
-excel_files_collection = db["excel_files"]
+# Create a new collection for CSV files
+csv_files_collection = db["csv_files"]
 
 # Generate encryption key (in production, use environment variable)
 ENCRYPTION_KEY = Fernet.generate_key()
@@ -312,114 +307,186 @@ async def send_data_request(
         "expires_at": expires_at.isoformat()
     }
 
-@router.post("/upload-excel")
-async def upload_excel_file(
-    file: UploadFile = File(...),
-    target_org_id: str = Form(...),
-    purpose: str = Form(...),  # JSON string of purposes
-    retention_window: str = Form("30 days"),
+@router.post("/create-csv")
+async def create_csv_file(
+    bulk_request_id: str,
     current_user: TokenData = Depends(get_current_user)
 ):
-    """Upload Excel file for bulk data request with encryption and access controls"""
+    """Create CSV file for bulk data request with detokenized PII data"""
     
     # Verify user is from requesting organization
     user = users_collection.find_one({"userid": current_user.user_id})
     if not user or user.get("user_type") != "organization":
-        raise HTTPException(status_code=403, detail="Only organization users can upload files")
+        raise HTTPException(status_code=403, detail="Only organization users can create CSV files")
     
-    # Validate file type
-    if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are allowed")
+    # Get all approved requests for this bulk request
+    requests = list(data_requests_collection.find({"bulk_request_id": bulk_request_id, "status": "approved"}))
     
-    # Read and validate Excel content
+    if not requests:
+        raise HTTPException(status_code=404, detail="No approved requests found for this bulk request")
+    
+    # Collect data for CSV
+    csv_data = []
+    
+    for request in requests:
+        # Get target user info
+        target_user = users_collection.find_one({"userid": request["target_user_id"]})
+        if not target_user:
+            continue
+        
+        # Get PII data for each requested resource
+        for resource in request["requested_resources"]:
+            # First find the user's PII document
+            user_pii_doc = user_pii_collection.find_one({
+                "user_id": request["target_user_id"]
+            })
+            
+            if user_pii_doc and "pii" in user_pii_doc:
+                # Find the specific resource within the PII array
+                pii_entry = next((pii for pii in user_pii_doc["pii"] if pii["resource"] == resource), None)
+                
+                if pii_entry:
+                    # Get the PII value - try to decrypt if it's encrypted, otherwise use as-is
+                    pii_value = pii_entry["original"]
+                    
+                    # Check if the value is encrypted (try to decrypt it)
+                    try:
+                        from helpers import decrypt_pii
+                        # Try to decrypt - if it fails, it's probably plain text
+                        decrypted_value = decrypt_pii(pii_value)
+                    except Exception as e:
+                        # If decryption fails, use the original value as-is (it's already plain text)
+                        decrypted_value = pii_value
+                    
+                    csv_data.append({
+                        "email": target_user.get("email", "N/A"),
+                        "full_name": target_user.get("full_name", "N/A"),
+                        "resource_type": resource,
+                        "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
+                        "value": decrypted_value,
+                        "request_id": request["request_id"],
+                        "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+                        "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                else:
+                    csv_data.append({
+                        "email": target_user.get("email", "N/A"),
+                        "full_name": target_user.get("full_name", "N/A"),
+                        "resource_type": resource,
+                        "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
+                        "value": "No data available",
+                        "request_id": request["request_id"],
+                        "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+                        "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
+                    })
+            else:
+                csv_data.append({
+                    "email": target_user.get("email", "N/A"),
+                    "full_name": target_user.get("full_name", "N/A"),
+                    "resource_type": resource,
+                    "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
+                    "value": "No PII document found",
+                    "request_id": request["request_id"],
+                    "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+                    "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
+                })
+    
+        if not csv_data:
+            raise HTTPException(status_code=404, detail="No data available for CSV export")
+    
+    # Create CSV content and save to public folder
     try:
-        content = await file.read()
-        df = pd.read_excel(io.BytesIO(content))
+        output = io.StringIO()
+        fieldnames = ["email", "full_name", "resource_type", "purpose", "value", "request_id", "requested_at", "expires_at"]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(csv_data)
         
-        # Validate required columns
-        required_columns = ['email', 'full_name', 'resource_type', 'purpose']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            raise HTTPException(status_code=400, detail=f"Missing required columns: {missing_columns}")
+        csv_content = output.getvalue()
+        output.close()
         
-        # Validate data (max 1000 rows)
-        if len(df) > 1000:
-            raise HTTPException(status_code=400, detail="Maximum 1000 rows allowed per file")
+        # Generate unique file ID and filename
+        file_id = str(uuid.uuid4())
+        filename = f"bulk_data_export_{bulk_request_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+        file_path = f"public/csv_files/{filename}"
+        
+        # Save CSV file to public folder
+        os.makedirs("public/csv_files", exist_ok=True)
+        with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+            csvfile.write(csv_content)
+        
+        # Store file metadata
+        file_metadata = {
+            "file_id": file_id,
+            "bulk_request_id": bulk_request_id,
+            "original_filename": filename,
+            "file_path": file_path,
+            "access_policy": {
+                "view_only": True,
+                "no_download": True,
+                "no_copy": True,
+                "no_edit": True,
+                "no_print": True,
+                "web_only": True,
+                "expires_at": (datetime.utcnow() + timedelta(days=7)).isoformat(),
+                "allowed_orgs": [requests[0]["requester_org_id"]],
+                "created_by": current_user.user_id
+            },
+            "created_by": current_user.user_id,
+            "created_at": datetime.utcnow(),
+            "expires_at": datetime.utcnow() + timedelta(days=7),
+            "org_id": requests[0]["requester_org_id"],
+            "record_count": len(csv_data),
+            "bulk_request_id": bulk_request_id
+        }
+        
+        csv_files_collection.insert_one(file_metadata)
+        
+        # Update bulk request with file ID
+        data_requests_collection.update_many(
+            {"bulk_request_id": bulk_request_id},
+            {"$set": {"csv_file_id": file_id}}
+        )
+        
+        # Log the CSV creation
+        client_ip = "unknown"
+        log_entry = {
+            "user_id": current_user.user_id,
+            "fintech_name": requests[0]["requester_org_name"],
+            "resource_name": "bulk_data_csv_export",
+            "purpose": "Bulk data CSV export",
+            "log_type": "bulk_data_csv_created",
+            "ip_address": client_ip,
+            "data_source": "organization",
+            "created_at": datetime.utcnow(),
+            "bulk_request_id": bulk_request_id,
+            "requester_org_id": requests[0]["requester_org_id"],
+            "target_org_id": requests[0]["target_org_id"],
+            "exported_records": len(csv_data),
+            "file_id": file_id
+        }
+        logs_collection.insert_one(log_entry)
+        
+        return {
+            "message": "CSV file created successfully",
+            "file_id": file_id,
+            "view_url": f"/data-requests/view-csv/{file_id}",
+            "expires_at": file_metadata["expires_at"].isoformat(),
+            "record_count": len(csv_data)
+        }
         
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid Excel file: {str(e)}")
-    
-    # Encrypt file content
-    encrypted_content = encrypt_file_content(content)
-    
-    # Create access policy
-    access_policy = {
-        "view_only": True,
-        "no_download": True,
-        "no_copy": True,
-        "no_edit": True,
-        "no_print": True,
-        "expires_at": (datetime.utcnow() + timedelta(days=30)).isoformat(),
-        "allowed_orgs": [target_org_id],
-        "uploaded_by": current_user.user_id
-    }
-    
-    # Generate unique file ID
-    file_id = str(uuid.uuid4())
-    
-    # Store file metadata
-    file_metadata = {
-        "file_id": file_id,
-        "original_filename": file.filename,
-        "encrypted_content": encrypted_content,
-        "access_policy": access_policy,
-        "uploaded_by": current_user.user_id,
-        "uploaded_at": datetime.utcnow(),
-        "expires_at": datetime.utcnow() + timedelta(days=30),
-        "target_org_id": target_org_id,
-        "purposes": json.loads(purpose) if isinstance(purpose, str) else purpose,
-        "retention_window": retention_window,
-        "row_count": len(df)
-    }
-    
-    excel_files_collection.insert_one(file_metadata)
-    
-    # Log the upload
-    client_ip = "unknown"
-    if hasattr(Request, 'client') and Request.client:
-        client_ip = Request.client.host
-    
-    log_entry = {
-        "user_id": current_user.user_id,
-        "fintech_name": user.get("organization_id", "Unknown"),
-        "resource_name": "excel_bulk_request",
-        "purpose": json.loads(purpose) if isinstance(purpose, str) else purpose,
-        "log_type": "bulk_data_request_uploaded",
-        "ip_address": client_ip,
-        "data_source": "organization",
-        "created_at": datetime.utcnow(),
-        "file_id": file_id,
-        "target_org_id": target_org_id,
-        "row_count": len(df)
-    }
-    logs_collection.insert_one(log_entry)
-    
-    return {
-        "message": "Excel file uploaded successfully",
-        "file_id": file_id,
-        "row_count": len(df),
-        "expires_at": file_metadata["expires_at"].isoformat()
-    }
+        raise HTTPException(status_code=500, detail=f"Error generating CSV file: {str(e)}")
 
-@router.get("/view-excel/{file_id}")
-async def view_excel_file(
+@router.get("/view-csv/{file_id}")
+async def view_csv_file(
     file_id: str,
     current_user: TokenData = Depends(get_current_user)
 ):
-    """View Excel file securely (no download, no copy, no edit)"""
+    """View CSV file securely (no download, no copy, no edit)"""
     
     # Get file metadata
-    file_metadata = excel_files_collection.find_one({"file_id": file_id})
+    file_metadata = csv_files_collection.find_one({"file_id": file_id})
     if not file_metadata:
         raise HTTPException(status_code=404, detail="File not found")
     
@@ -437,24 +504,50 @@ async def view_excel_file(
     if datetime.utcnow() > file_metadata["expires_at"]:
         raise HTTPException(status_code=400, detail="File has expired")
     
-    # Decrypt and read file content
+    # Read CSV file from public folder
     try:
-        decrypted_content = decrypt_file_content(file_metadata["encrypted_content"])
-        df = pd.read_excel(io.BytesIO(decrypted_content))
+        file_path = file_metadata["file_path"]
         
-        # Convert to HTML for secure viewing (no download capability)
-        html_content = df.to_html(
-            index=False,
-            classes=['table', 'table-striped', 'table-bordered'],
-            table_id='secure-excel-table'
-        )
+        # Check if file exists
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="CSV file not found on disk")
+        
+        # Read CSV content
+        with open(file_path, 'r', encoding='utf-8') as csvfile:
+            csv_content = csvfile.read()
+        
+        # Parse CSV content
+        csv_reader = csv.DictReader(io.StringIO(csv_content))
+        rows = list(csv_reader)
+        
+        if not rows:
+            raise HTTPException(status_code=400, detail="CSV file is empty")
+        
+        # Convert to HTML table for secure viewing
+        fieldnames = rows[0].keys()
+        html_content = "<table class='table table-striped table-bordered' id='secure-csv-table'>"
+        
+        # Add header row
+        html_content += "<thead><tr>"
+        for field in fieldnames:
+            html_content += f"<th>{field}</th>"
+        html_content += "</tr></thead>"
+        
+        # Add data rows
+        html_content += "<tbody>"
+        for row in rows:
+            html_content += "<tr>"
+            for field in fieldnames:
+                html_content += f"<td>{row.get(field, '')}</td>"
+            html_content += "</tr>"
+        html_content += "</tbody></table>"
         
         # Add CSS to prevent selection and copying
         secure_html = f"""
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Secure Excel Viewer</title>
+            <title>Secure CSV Viewer</title>
             <style>
                 body {{ 
                     font-family: Arial, sans-serif; 
@@ -511,7 +604,7 @@ async def view_excel_file(
         </head>
         <body class="no-select">
             <div class="secure-header">
-                <h2>🔒 Secure Excel Viewer</h2>
+                <h2>🔒 Secure CSV Viewer</h2>
                 <p><strong>File:</strong> {file_metadata['original_filename']}</p>
                 <p><strong>Created:</strong> {file_metadata['created_at'].strftime('%Y-%m-%d %H:%M:%S')}</p>
                 <p><strong>Expires:</strong> {file_metadata['expires_at'].strftime('%Y-%m-%d %H:%M:%S')}</p>
@@ -552,6 +645,7 @@ async def view_excel_file(
         </html>
         """
         
+        from fastapi.responses import StreamingResponse
         return StreamingResponse(
             io.StringIO(secure_html),
             media_type="text/html",
@@ -579,8 +673,8 @@ async def get_bulk_requests(
         raise HTTPException(status_code=403, detail="Access denied")
     
     # Get files where this org is the target
-    bulk_requests = list(excel_files_collection.find({
-        "target_org_id": org_id
+    bulk_requests = list(csv_files_collection.find({
+        "org_id": org_id
     }, sort=[("created_at", -1)]))
     
     # Format response
@@ -592,8 +686,7 @@ async def get_bulk_requests(
             "created_at": req["created_at"].isoformat(),
             "expires_at": req["expires_at"].isoformat(),
             "record_count": req.get("record_count", 0),
-            "purposes": req.get("purposes", []),
-            "retention_window": req.get("retention_window", "30 days"),
+            "bulk_request_id": req.get("bulk_request_id"),
             "is_expired": datetime.utcnow() > req["expires_at"]
         })
     
@@ -785,7 +878,7 @@ async def get_organization_data_requests(org_id: str):
             "is_requester": bulk_group["is_requester"],
             "is_bulk_request": True,
             "bulk_request_size": bulk_group["bulk_request_size"],
-            "excel_file_id": bulk_group["requests"][0].get("excel_file_id"),  # Get excel_file_id from first request
+            "csv_file_id": bulk_group["requests"][0].get("csv_file_id"),  # Get csv_file_id from first request
             "individual_requests": [
                 {
                     "request_id": req["request_id"],
@@ -1207,7 +1300,7 @@ async def get_bulk_approved_data(
     org_id: str,
     current_user: TokenData = Depends(get_current_user)
 ):
-    """Get encrypted Excel file with all approved data requests for an organization"""
+    """Get CSV file with all approved data requests for an organization"""
     
     # Verify user is from the requesting organization
     user = users_collection.find_one({"userid": current_user.user_id})
@@ -1224,8 +1317,8 @@ async def get_bulk_approved_data(
     if not approved_requests:
         raise HTTPException(status_code=404, detail="No approved data requests found")
     
-    # Collect data for Excel
-    excel_data = []
+    # Collect data for CSV
+    csv_data = []
     
     for request in approved_requests:
         # Get target user info
@@ -1245,35 +1338,30 @@ async def get_bulk_approved_data(
                 pii_entry = next((pii for pii in user_pii_doc["pii"] if pii["resource"] == resource), None)
                 
                 if pii_entry:
+                    # Get the PII value - try to decrypt if it's encrypted, otherwise use as-is
+                    pii_value = pii_entry["original"]
+                    
+                    # Check if the value is encrypted (try to decrypt it)
                     try:
-                        # Decrypt the PII data
                         from helpers import decrypt_pii
-                        decrypted_value = decrypt_pii(pii_entry["original"])
-                        
-                        excel_data.append({
-                            "email": target_user.get("email", "N/A"),
-                            "full_name": target_user.get("full_name", "N/A"),
-                            "resource_type": resource,
-                            "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
-                            "value": decrypted_value,
-                            "request_id": request["request_id"],
-                            "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
-                            "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
-                        })
+                        # Try to decrypt - if it fails, it's probably plain text
+                        decrypted_value = decrypt_pii(pii_value)
                     except Exception as e:
-                        excel_data.append({
-                            "email": target_user.get("email", "N/A"),
-                            "full_name": target_user.get("full_name", "N/A"),
-                            "resource_type": resource,
-                            "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
-                            "value": "Decryption failed",
-                            "request_id": request["request_id"],
-                            "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
-                            "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
-                        })
+                        # If decryption fails, use the original value as-is (it's already plain text)
+                        decrypted_value = pii_value
+                    
+                    csv_data.append({
+                        "email": target_user.get("email", "N/A"),
+                        "full_name": target_user.get("full_name", "N/A"),
+                        "resource_type": resource,
+                        "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
+                        "value": decrypted_value,
+                        "request_id": request["request_id"],
+                        "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+                        "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
+                    })
                 else:
-                    print(f"No PII data found for user {request['target_user_id']}, resource {resource}")
-                    excel_data.append({
+                    csv_data.append({
                         "email": target_user.get("email", "N/A"),
                         "full_name": target_user.get("full_name", "N/A"),
                         "resource_type": resource,
@@ -1284,8 +1372,7 @@ async def get_bulk_approved_data(
                         "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
                     })
             else:
-                print(f"No PII document found for user {request['target_user_id']}")
-                excel_data.append({
+                csv_data.append({
                     "email": target_user.get("email", "N/A"),
                     "full_name": target_user.get("full_name", "N/A"),
                     "resource_type": resource,
@@ -1296,66 +1383,35 @@ async def get_bulk_approved_data(
                     "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
                 })
     
-    if not excel_data:
+    if not csv_data:
         raise HTTPException(status_code=404, detail="No data available for export")
     
-    # Create encrypted Excel file with granular controls
+    # Create CSV content
     try:
-        df = pd.DataFrame(excel_data)
+        output = io.StringIO()
+        fieldnames = ["email", "full_name", "resource_type", "purpose", "value", "request_id", "requested_at", "expires_at"]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(csv_data)
         
-        # Create Excel writer with security settings
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name='Approved Data', index=False)
-            
-            # Get the workbook and worksheet
-            workbook = writer.book
-            worksheet = writer.sheets['Approved Data']
-            
-            # Add security headers
-            worksheet['A1'] = "🔒 SECURE DATA EXPORT - VIEW ONLY"
-            worksheet['A2'] = f"Generated on: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
-            worksheet['A3'] = f"Organization: {org_id}"
-            worksheet['A4'] = f"Total Records: {len(excel_data)}"
-            worksheet['A5'] = "⚠️ This file contains sensitive PII data. Handle with extreme care."
-            worksheet['A6'] = "🚫 NO COPY, NO EDIT, NO DOWNLOAD - WEB VIEW ONLY"
-            
-            # Style the header row
-            from openpyxl.styles import Font, PatternFill, Alignment, Protection
-            header_font = Font(bold=True, color="FFFFFF")
-            header_fill = PatternFill(start_color="DC2626", end_color="DC2626", fill_type="solid")
-            
-            # Apply header styling to data headers (row 8)
-            for cell in worksheet[8]:
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.alignment = Alignment(horizontal="center")
-            
-            # Add security warning styling
-            warning_font = Font(bold=True, color="DC2626")
-            for row in range(1, 7):
-                worksheet[f'A{row}'].font = warning_font
-            
-            # Protect the worksheet - make it read-only
-            worksheet.protection.sheet = True
-            worksheet.protection.password = "SECURE123"  # In production, use environment variable
-            
-            # Protect all cells
-            for row in worksheet.iter_rows():
-                for cell in row:
-                    cell.protection = Protection(locked=True, hidden=False)
+        csv_content = output.getvalue()
+        output.close()
         
-        output.seek(0)
+        # Generate unique file ID and filename
+        file_id = str(uuid.uuid4())
+        filename = f"approved_data_{org_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+        file_path = f"public/csv_files/{filename}"
         
-        # Encrypt the Excel file content
-        encrypted_content = encrypt_file_content(output.getvalue())
+        # Save CSV file to public folder
+        os.makedirs("public/csv_files", exist_ok=True)
+        with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+            csvfile.write(csv_content)
         
         # Store encrypted file metadata
-        file_id = str(uuid.uuid4())
         file_metadata = {
             "file_id": file_id,
-            "original_filename": f"approved_data_{org_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            "encrypted_content": encrypted_content,
+            "original_filename": filename,
+            "file_path": file_path,
             "access_policy": {
                 "view_only": True,
                 "no_download": True,
@@ -1371,23 +1427,23 @@ async def get_bulk_approved_data(
             "created_at": datetime.utcnow(),
             "expires_at": datetime.utcnow() + timedelta(days=7),
             "org_id": org_id,
-            "record_count": len(excel_data)
+            "record_count": len(csv_data)
         }
         
-        excel_files_collection.insert_one(file_metadata)
+        csv_files_collection.insert_one(file_metadata)
         
         # Log the export
         client_ip = "unknown"
         log_entry = {
             "user_id": current_user.user_id,
             "fintech_name": org_id,
-            "resource_name": "bulk_data_export",
+            "resource_name": "bulk_data_csv_export",
             "purpose": "Data export for approved requests",
-            "log_type": "bulk_data_export",
+            "log_type": "bulk_data_csv_export",
             "ip_address": client_ip,
             "data_source": "organization",
             "created_at": datetime.utcnow(),
-            "exported_records": len(excel_data),
+            "exported_records": len(csv_data),
             "requester_org_id": org_id,
             "file_id": file_id
         }
@@ -1395,15 +1451,15 @@ async def get_bulk_approved_data(
         
         # Return the file ID for web viewing instead of direct download
         return {
-            "message": "Encrypted Excel file created successfully",
+            "message": "Encrypted CSV file created successfully",
             "file_id": file_id,
-            "view_url": f"/data-requests/view-excel/{file_id}",
+            "view_url": f"/data-requests/view-csv/{file_id}",
             "expires_at": file_metadata["expires_at"].isoformat(),
-            "record_count": len(excel_data)
+            "record_count": len(csv_data)
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generating Excel file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generating CSV file: {str(e)}")
 
 @router.post("/create-bulk-request")
 async def create_bulk_data_request(
@@ -1606,7 +1662,7 @@ async def approve_bulk_request(
     current_user: TokenData = Depends(get_current_user),
     http_request: Request = None
 ):
-    """Approve all requests in a bulk request and generate encrypted Excel"""
+    """Approve all requests in a bulk request and generate encrypted CSV"""
     
     # Get all requests for this bulk request
     requests = list(data_requests_collection.find({"bulk_request_id": bulk_request_id}))
@@ -1639,14 +1695,17 @@ async def approve_bulk_request(
         )
         approved_count += 1
     
-    # Generate encrypted Excel file with all approved data
+    # Generate encrypted CSV file with all approved data
     try:
-        # Collect data for Excel
-        excel_data = []
+        # Collect data for CSV
+        csv_data = []
         
         print(f"Processing {len(requests)} requests for bulk request {bulk_request_id}")
         
-        for request in requests:
+        # Get updated requests after approval
+        updated_requests = list(data_requests_collection.find({"bulk_request_id": bulk_request_id}))
+        
+        for request in updated_requests:
             if request["status"] == "approved":
                 print(f"Processing approved request {request['request_id']} for user {request['target_user_id']}")
                 # Get target user info
@@ -1674,36 +1733,34 @@ async def approve_bulk_request(
                         
                         if pii_entry:
                             print(f"Found PII entry for resource {resource}")
+                            
+                            # Get the PII value - try to decrypt if it's encrypted, otherwise use as-is
+                            pii_value = pii_entry["original"]
+                            
+                            # Check if the value is encrypted (try to decrypt it)
                             try:
-                                # Decrypt the PII data
                                 from helpers import decrypt_pii
-                                decrypted_value = decrypt_pii(pii_entry["original"])
-                                
-                                excel_data.append({
-                                    "email": target_user.get("email", "N/A"),
-                                    "full_name": target_user.get("full_name", "N/A"),
-                                    "resource_type": resource,
-                                    "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
-                                    "value": decrypted_value,
-                                    "request_id": request["request_id"],
-                                    "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
-                                    "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
-                                })
+                                # Try to decrypt - if it fails, it's probably plain text
+                                decrypted_value = decrypt_pii(pii_value)
+                                print(f"Successfully decrypted PII value for {resource}")
                             except Exception as e:
-                                print(f"Error decrypting PII for user {request['target_user_id']}, resource {resource}: {e}")
-                                excel_data.append({
-                                    "email": target_user.get("email", "N/A"),
-                                    "full_name": target_user.get("full_name", "N/A"),
-                                    "resource_type": resource,
-                                    "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
-                                    "value": "Decryption failed",
-                                    "request_id": request["request_id"],
-                                    "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
-                                    "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
-                                })
+                                # If decryption fails, use the original value as-is (it's already plain text)
+                                decrypted_value = pii_value
+                                print(f"Using plain text PII value for {resource} (not encrypted)")
+                            
+                            csv_data.append({
+                                "email": target_user.get("email", "N/A"),
+                                "full_name": target_user.get("full_name", "N/A"),
+                                "resource_type": resource,
+                                "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
+                                "value": decrypted_value,
+                                "request_id": request["request_id"],
+                                "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+                                "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
+                            })
                         else:
                             print(f"No PII data found for user {request['target_user_id']}, resource {resource}")
-                            excel_data.append({
+                            csv_data.append({
                                 "email": target_user.get("email", "N/A"),
                                 "full_name": target_user.get("full_name", "N/A"),
                                 "resource_type": resource,
@@ -1715,7 +1772,7 @@ async def approve_bulk_request(
                             })
                     else:
                         print(f"No PII document found for user {request['target_user_id']}")
-                        excel_data.append({
+                        csv_data.append({
                             "email": target_user.get("email", "N/A"),
                             "full_name": target_user.get("full_name", "N/A"),
                             "resource_type": resource,
@@ -1726,12 +1783,12 @@ async def approve_bulk_request(
                             "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
                         })
         
-        if not excel_data:
-            print(f"No Excel data collected for bulk request {bulk_request_id}")
+        if not csv_data:
+            print(f"No CSV data collected for bulk request {bulk_request_id}")
             print(f"Total requests: {len(requests)}")
             print(f"Approved requests: {len([r for r in requests if r['status'] == 'approved'])}")
-            # Instead of raising an error, create an Excel with available data or placeholder
-            excel_data.append({
+            # Instead of raising an error, create a CSV with available data or placeholder
+            csv_data.append({
                 "email": "No data available",
                 "full_name": "No data available", 
                 "resource_type": "No data available",
@@ -1742,67 +1799,34 @@ async def approve_bulk_request(
                 "expires_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
             })
         
-        print(f"Collected {len(excel_data)} records for Excel export")
+        print(f"Collected {len(csv_data)} records for CSV export")
         
-        # Create encrypted Excel file
-        df = pd.DataFrame(excel_data)
+        # Create CSV content
+        output = io.StringIO()
+        fieldnames = ["email", "full_name", "resource_type", "purpose", "value", "request_id", "requested_at", "expires_at"]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(csv_data)
         
-        # Create Excel writer with security settings
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name='Bulk Data Export', index=False)
-            
-            # Get the workbook and worksheet
-            workbook = writer.book
-            worksheet = writer.sheets['Bulk Data Export']
-            
-            # Add security headers
-            worksheet['A1'] = "🔒 BULK DATA EXPORT - VIEW ONLY"
-            worksheet['A2'] = f"Generated on: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
-            worksheet['A3'] = f"Bulk Request ID: {bulk_request_id}"
-            worksheet['A4'] = f"Requester: {requests[0]['requester_org_name']}"
-            worksheet['A5'] = f"Target: {requests[0]['target_org_name']}"
-            worksheet['A6'] = f"Total Records: {len(excel_data)}"
-            worksheet['A7'] = "⚠️ This file contains sensitive PII data. Handle with extreme care."
-            worksheet['A8'] = "🚫 NO COPY, NO EDIT, NO DOWNLOAD - WEB VIEW ONLY"
-            
-            # Style the header row
-            from openpyxl.styles import Font, PatternFill, Alignment, Protection
-            header_font = Font(bold=True, color="FFFFFF")
-            header_fill = PatternFill(start_color="DC2626", end_color="DC2626", fill_type="solid")
-            
-            # Apply header styling to data headers (row 10)
-            for cell in worksheet[10]:
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.alignment = Alignment(horizontal="center")
-            
-            # Add security warning styling
-            warning_font = Font(bold=True, color="DC2626")
-            for row in range(1, 9):
-                worksheet[f'A{row}'].font = warning_font
-            
-            # Protect the worksheet - make it read-only
-            worksheet.protection.sheet = True
-            worksheet.protection.password = "SECURE123"
-            
-            # Protect all cells
-            for row in worksheet.iter_rows():
-                for cell in row:
-                    cell.protection = Protection(locked=True, hidden=False)
+        csv_content = output.getvalue()
+        output.close()
         
-        output.seek(0)
+        # Generate unique file ID and filename
+        file_id = str(uuid.uuid4())
+        filename = f"bulk_data_export_{bulk_request_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+        file_path = f"public/csv_files/{filename}"
         
-        # Encrypt the Excel file content
-        encrypted_content = encrypt_file_content(output.getvalue())
+        # Save CSV file to public folder
+        os.makedirs("public/csv_files", exist_ok=True)
+        with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+            csvfile.write(csv_content)
         
         # Store encrypted file metadata
-        file_id = str(uuid.uuid4())
         file_metadata = {
             "file_id": file_id,
             "bulk_request_id": bulk_request_id,
-            "original_filename": f"bulk_data_export_{bulk_request_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            "encrypted_content": encrypted_content,
+            "original_filename": filename,
+            "file_path": file_path,
             "access_policy": {
                 "view_only": True,
                 "no_download": True,
@@ -1818,16 +1842,16 @@ async def approve_bulk_request(
             "created_at": datetime.utcnow(),
             "expires_at": datetime.utcnow() + timedelta(days=7),
             "org_id": requests[0]["requester_org_id"],
-            "record_count": len(excel_data),
+            "record_count": len(csv_data),
             "bulk_request_id": bulk_request_id
         }
         
-        excel_files_collection.insert_one(file_metadata)
+        csv_files_collection.insert_one(file_metadata)
         
         # Update bulk request with file ID
         data_requests_collection.update_many(
             {"bulk_request_id": bulk_request_id},
-            {"$set": {"excel_file_id": file_id}}
+            {"$set": {"csv_file_id": file_id}}
         )
         
         # Log the approval and export
@@ -1845,7 +1869,7 @@ async def approve_bulk_request(
             "requester_org_id": requests[0]["requester_org_id"],
             "target_org_id": requests[0]["target_org_id"],
             "approved_requests": approved_count,
-            "exported_records": len(excel_data),
+            "exported_records": len(csv_data),
             "file_id": file_id
         }
         logs_collection.insert_one(log_entry)
@@ -1854,16 +1878,59 @@ async def approve_bulk_request(
             "message": f"Bulk request approved successfully. {approved_count} requests approved.",
             "bulk_request_id": bulk_request_id,
             "approved_requests": approved_count,
-            "excel_file_id": file_id,
-            "view_url": f"/data-requests/view-excel/{file_id}",
-            "record_count": len(excel_data),
+            "csv_file_id": file_id,
+            "view_url": f"/data-requests/view-csv/{file_id}",
+            "record_count": len(csv_data),
             "expires_at": file_metadata["expires_at"].isoformat()
         }
         
     except Exception as e:
-        print(f"Error generating Excel file: {str(e)}")
+        print(f"Error generating CSV file: {str(e)}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error generating Excel file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generating CSV file: {str(e)}")
+
+@router.get("/download-csv/{file_id}")
+async def download_csv_file(
+    file_id: str,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """Download CSV file directly from public folder"""
+    
+    # Get file metadata
+    file_metadata = csv_files_collection.find_one({"file_id": file_id})
+    if not file_metadata:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Check access permissions
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user:
+        raise HTTPException(status_code=403, detail="User not found")
+    
+    # Check if user is from allowed organization
+    user_org_id = user.get("organization_id")
+    if user_org_id not in file_metadata["access_policy"]["allowed_orgs"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Check if file has expired
+    if datetime.utcnow() > file_metadata["expires_at"]:
+        raise HTTPException(status_code=400, detail="File has expired")
+    
+    # Check if file exists
+    file_path = file_metadata["file_path"]
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="CSV file not found on disk")
+    
+    # Return the file directly
+    return FileResponse(
+        path=file_path,
+        filename=file_metadata["original_filename"],
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename={file_metadata['original_filename']}",
+            "X-Frame-Options": "DENY",
+            "X-Content-Type-Options": "nosniff"
+        }
+    )
 
  
