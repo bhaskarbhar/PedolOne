@@ -47,6 +47,10 @@ def get_file_collections():
 FILE_STORAGE_DIR = Path("public/shared_files")
 FILE_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
+# Ensure the directory exists and is writable
+if not FILE_STORAGE_DIR.exists():
+    FILE_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
 def generate_file_id():
     return str(uuid.uuid4())
 
@@ -945,3 +949,72 @@ async def view_shared_file(
             "Cache-Control": "no-store, no-cache, must-revalidate, private"
         }
     ) 
+
+@router.get("/organizations-with-contracts/{org_id}")
+async def get_organizations_with_file_contracts(
+    org_id: str,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """Get organizations that have file sharing contracts with the current organization"""
+    
+    print(f"🔍 DEBUG: Getting organizations with contracts for org_id: {org_id}")
+    
+    # Verify user has access to this organization
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user:
+        print(f"❌ DEBUG: User not found for user_id: {current_user.user_id}")
+        raise HTTPException(status_code=403, detail="User not found")
+    
+    print(f"✅ DEBUG: User found - {user.get('username')} from org: {user.get('organization_id')}")
+    
+    if user.get("user_type") == "organization" and user.get("organization_id") != org_id:
+        print(f"❌ DEBUG: Access denied - user org: {user.get('organization_id')}, requested org: {org_id}")
+        raise HTTPException(status_code=403, detail="Access denied to this organization")
+    
+    # Get active file sharing contracts
+    contract_query = {
+        "$or": [
+            {"source_org_id": org_id},
+            {"target_org_id": org_id}
+        ],
+        "status": "active",
+        "approval_status": "approved",
+        "contract_type": {"$in": ["file_sharing", "data_sharing"]}  # Include both file and data sharing contracts
+    }
+    
+    print(f"🔍 DEBUG: Contract query: {contract_query}")
+    active_contracts = list(inter_org_contracts_collection.find(contract_query))
+    print(f"📋 DEBUG: Found {len(active_contracts)} active contracts")
+    
+    # Get unique organization IDs from contracts
+    org_ids = set()
+    for contract in active_contracts:
+        if contract["source_org_id"] != org_id:
+            org_ids.add(contract["source_org_id"])
+        if contract["target_org_id"] != org_id:
+            org_ids.add(contract["target_org_id"])
+    
+    print(f"📋 DEBUG: Unique org IDs from contracts: {org_ids}")
+    
+    # Get organization details
+    organizations = []
+    for org_id_from_contract in org_ids:
+        org = get_organization_by_id(org_id_from_contract)
+        if org:
+            # Get contract details for this organization
+            org_contracts = [c for c in active_contracts if 
+                           c["source_org_id"] == org_id_from_contract or 
+                           c["target_org_id"] == org_id_from_contract]
+            
+            organizations.append({
+                "org_id": org["org_id"],
+                "org_name": org["org_name"],
+                "contract_count": len(org_contracts),
+                "contract_types": list(set([c["contract_type"] for c in org_contracts]))
+            })
+            print(f"✅ DEBUG: Added organization: {org['org_name']} ({org['org_id']})")
+        else:
+            print(f"⚠️ DEBUG: Organization not found for ID: {org_id_from_contract}")
+    
+    print(f"📋 DEBUG: Returning {len(organizations)} organizations")
+    return {"organizations": organizations} 

@@ -427,6 +427,7 @@ async def get_organization_users(org_id: str):
 @router.get("/list/organizations")
 async def get_all_organizations():
     """Get all organizations in the system (for data request targeting)"""
+    print("🔍 DEBUG: Getting all organizations")
     organizations = []
     for org in organizations_collection.find():
         organizations.append({
@@ -434,7 +435,9 @@ async def get_all_organizations():
             "org_name": org["org_name"],
             "contract_id": org["contract_id"]
         })
+        print(f"✅ DEBUG: Found organization: {org['org_name']} ({org['org_id']})")
     
+    print(f"📋 DEBUG: Returning {len(organizations)} total organizations")
     return {"organizations": organizations}
 
 @router.get("/{org_id}/all-users")

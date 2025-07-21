@@ -1673,7 +1673,7 @@ export default function OrgDashboard() {
     }
   };
 
-  const handleOpenDirectShareModal = () => {
+  const handleOpenDirectShareModal = async () => {
     setShowDirectShareModal(true);
     setFileSharingError("");
     setDirectShareForm({
@@ -1682,6 +1682,43 @@ export default function OrgDashboard() {
       file_category: "contract",
       expires_at: ""
     });
+    
+    // Fetch organizations with file sharing contracts
+    try {
+      console.log('🔍 Fetching organizations with contracts for org:', orgIdToUse);
+      const api = createAxiosInstance();
+      const response = await api.get(`/file-sharing/organizations-with-contracts/${orgIdToUse}`);
+      const orgsWithContracts = response.data.organizations || [];
+      console.log('📋 Organizations with contracts:', orgsWithContracts);
+      
+      if (orgsWithContracts.length > 0) {
+        setAllOrganizations(orgsWithContracts);
+        console.log('✅ Set organizations with contracts:', orgsWithContracts.length);
+      } else {
+        console.log('⚠️ No organizations with contracts found, falling back to all organizations');
+        // Fallback to all organizations if no contracts found
+        const allOrgsResponse = await api.get('/organization/list/organizations');
+        const allOrgs = allOrgsResponse.data.organizations || [];
+        const filteredOrgs = allOrgs.filter(org => org.org_id !== orgIdToUse);
+        console.log('📋 All organizations (filtered):', filteredOrgs);
+        setAllOrganizations(filteredOrgs);
+      }
+    } catch (err) {
+      console.error('❌ Error fetching organizations for direct share:', err);
+      // Fallback to all organizations
+      try {
+        console.log('🔄 Falling back to all organizations...');
+        const api = createAxiosInstance();
+        const response = await api.get('/organization/list/organizations');
+        const allOrgs = response.data.organizations || [];
+        const filteredOrgs = allOrgs.filter(org => org.org_id !== orgIdToUse);
+        console.log('📋 Fallback organizations:', filteredOrgs);
+        setAllOrganizations(filteredOrgs);
+      } catch (fallbackErr) {
+        console.error('❌ Error fetching all organizations:', fallbackErr);
+        setFileSharingError('Failed to fetch organizations');
+      }
+    }
   };
 
   const handleCloseDirectShareModal = () => {
@@ -1701,6 +1738,19 @@ export default function OrgDashboard() {
     setFileSharingLoading(true);
     setFileSharingError("");
 
+    // Validate form data
+    if (!directShareForm.target_org_id) {
+      setFileSharingError("Please select a target organization");
+      setFileSharingLoading(false);
+      return;
+    }
+
+    if (!directShareForm.file_description.trim()) {
+      setFileSharingError("Please provide a file description");
+      setFileSharingLoading(false);
+      return;
+    }
+
     const fileInput = document.getElementById('direct-share-file');
     const file = fileInput.files[0];
     
@@ -1716,25 +1766,38 @@ export default function OrgDashboard() {
       return;
     }
 
+    // Check file size (50MB limit)
+    if (file.size > 50 * 1024 * 1024) {
+      setFileSharingError("File size exceeds 50MB limit");
+      setFileSharingLoading(false);
+      return;
+    }
+
     try {
       const api = createAxiosInstance();
       const formData = new FormData();
       formData.append('file', file);
       formData.append('target_org_id', directShareForm.target_org_id);
-      formData.append('file_description', directShareForm.file_description);
+      formData.append('file_description', directShareForm.file_description.trim());
       formData.append('file_category', directShareForm.file_category);
       
       if (directShareForm.expires_at) {
         formData.append('expires_at', directShareForm.expires_at);
       }
 
-      await api.post('/file-sharing/direct-share', formData);
+      const response = await api.post('/file-sharing/direct-share', formData);
       
-      setShowDirectShareModal(false);
-      window.location.reload();
+      if (response.data && response.data.file_id) {
+        console.log('File shared successfully:', response.data);
+        setShowDirectShareModal(false);
+        // Refresh the page to show the new shared file
+        window.location.reload();
+      } else {
+        setFileSharingError('Unexpected response from server');
+      }
     } catch (err) {
       console.error('Error sharing file:', err);
-      const errorMessage = err.response?.data?.detail || 'Failed to share file';
+      const errorMessage = err.response?.data?.detail || err.response?.data?.message || 'Failed to share file';
       setFileSharingError(typeof errorMessage === 'string' ? errorMessage : 'Failed to share file');
     } finally {
       setFileSharingLoading(false);
@@ -5841,6 +5904,19 @@ export default function OrgDashboard() {
             )}
 
             <form onSubmit={handleDirectFileShare}>
+              <div style={{ 
+                background: '#f0f9ff', 
+                border: '1px solid #0ea5e9', 
+                borderRadius: '8px', 
+                padding: '1rem', 
+                marginBottom: '1.5rem',
+                fontSize: '0.875rem',
+                color: '#0369a1'
+              }}>
+                <strong>💡 File Sharing Info:</strong> You can send files to organizations with active contracts. 
+                Organizations without contracts will still be available for direct sharing.
+              </div>
+              
               <div style={{ marginBottom: '1.5rem' }}>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
                   Target Organization *
@@ -5860,7 +5936,7 @@ export default function OrgDashboard() {
                   <option value="">Select target organization...</option>
                   {allOrganizations.map((org) => (
                     <option key={org.org_id} value={org.org_id}>
-                      {org.org_name} ({org.org_id})
+                      {org.org_name} ({org.org_id}){org.contract_count ? ` - ${org.contract_count} active contract${org.contract_count > 1 ? 's' : ''}` : ''}
                     </option>
                   ))}
                 </select>
