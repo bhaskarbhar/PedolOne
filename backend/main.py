@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import pii_tokenizer, auth, policy, stockbroker, websocket, organization, bank, insurance, data_requests, inter_org_contracts, audit, geolocation, file_sharing
+from routers import pii_tokenizer, auth, policy, stockbroker, websocket, organization, bank, insurance, data_requests, inter_org_contracts, audit, geolocation, file_sharing, alerts
 from helpers import seed_organizations
 
 app = FastAPI(title="Secure PII Tokenization API", version="1.0.0")
@@ -27,6 +27,7 @@ app.include_router(inter_org_contracts.router)
 app.include_router(audit.router)
 app.include_router(geolocation.router)
 app.include_router(file_sharing.router)
+app.include_router(alerts.router)
 
 @app.on_event("startup")
 async def startup_event():

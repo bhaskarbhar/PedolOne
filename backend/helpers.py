@@ -22,6 +22,7 @@ user_pii_collection = db.user_pii
 organizations_collection = db.organizations
 policies_collection = db.policy
 logs_collection = db.logs
+alerts_collection = db.alerts
 inter_org_contracts_collection = db.inter_org_contracts
 
 FERNET_KEY = os.getenv("FERNET_KEY")

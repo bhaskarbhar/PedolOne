@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  Building2, Users, FileText, Shield, Database, Activity, Calendar, Settings, TrendingUp, AlertTriangle, CheckCircle, Clock, Eye, Download, Plus, X, Edit, Trash2, History, Search
+  Building2, Users, FileText, Shield, Database, Activity, Calendar, Settings, TrendingUp, AlertTriangle, CheckCircle, Clock, Eye, Download, Plus, X, Edit, Trash2, History, Search, AlertCircle
 } from 'lucide-react';
 import axios from 'axios';
 import AuditLogTable from '../components/AuditLogTable';
@@ -67,6 +67,12 @@ export default function OrgDashboard() {
   });
   // State for audit logs
   const [auditLogs, setAuditLogs] = useState([]);
+  const [auditLogsPagination, setAuditLogsPagination] = useState({
+    limit: 50,
+    offset: 0,
+    total: 0,
+    hasMore: false
+  });
   // State for data categories
   const [dataCategories, setDataCategories] = useState([]);
   // State for compliance metrics
@@ -149,6 +155,31 @@ export default function OrgDashboard() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState("");
   const [pdfUrl, setPdfUrl] = useState("");
+
+  // Alerts state
+  const [alerts, setAlerts] = useState([]);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [alertsError, setAlertsError] = useState("");
+  const [unreadAlertsCount, setUnreadAlertsCount] = useState(0);
+  const [alertsPagination, setAlertsPagination] = useState({
+    limit: 20,
+    offset: 0,
+    total: 0,
+    hasMore: false
+  });
+  const [alertsFilters, setAlertsFilters] = useState({
+    alert_type: "",
+    severity: "",
+    is_read: null
+  });
+  
+  // Alerts popup state
+  const [showAlertsPopup, setShowAlertsPopup] = useState(false);
+  const [recentAlerts, setRecentAlerts] = useState([]);
+  
+  // IP blocking state
+  const [blockedIPs, setBlockedIPs] = useState([]);
+  const [blockingIP, setBlockingIP] = useState(false);
   
   // Contract deletion form state
   const [deleteContractForm, setDeleteContractForm] = useState({
@@ -267,6 +298,55 @@ export default function OrgDashboard() {
   useEffect(() => {
     fetchContractTypes();
   }, []);
+
+  // Fetch alerts when alerts tab is active
+  useEffect(() => {
+    if (activeTab === 'alerts' && orgIdToUse) {
+      fetchAlerts(true);
+      fetchUnreadAlertsCount();
+      fetchBlockedIPs();
+    }
+  }, [activeTab, orgIdToUse]);
+
+  // Fetch alerts when filters change
+  useEffect(() => {
+    if (activeTab === 'alerts' && orgIdToUse) {
+      fetchAlerts(true);
+    }
+  }, [alertsFilters, orgIdToUse]);
+
+  // Fetch alerts when pagination changes
+  useEffect(() => {
+    if (activeTab === 'alerts' && orgIdToUse) {
+      fetchAlerts();
+    }
+  }, [alertsPagination.offset, orgIdToUse]);
+
+  // Fetch audit logs when audit tab is active
+  useEffect(() => {
+    if (activeTab === 'audit_logs' && orgIdToUse) {
+      fetchAuditLogs(true);
+    }
+  }, [activeTab, orgIdToUse]);
+
+  // Fetch audit logs when pagination changes
+  useEffect(() => {
+    if (activeTab === 'audit_logs' && orgIdToUse) {
+      fetchAuditLogs();
+    }
+  }, [auditLogsPagination.offset, orgIdToUse]);
+
+  // Check for alerts when user logs in
+  useEffect(() => {
+    if (orgIdToUse && user) {
+      // Small delay to ensure data is loaded
+      const timer = setTimeout(() => {
+        checkForAlertsOnLogin();
+      }, 2000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [orgIdToUse, user]);
 
   useEffect(() => {
     // If user is org admin but has no org_id, skip auto-fetch
@@ -1330,6 +1410,7 @@ export default function OrgDashboard() {
     { id: 'file_sharing', label: 'File Sharing', icon: <FileText size={16} /> },
     { id: 'contract_logs', label: 'Contract Logs', icon: <Database size={16} /> },
     { id: 'audit_logs', label: 'Audit Logs', icon: <Database size={16} /> },
+    { id: 'alerts', label: 'Alerts', icon: <AlertCircle size={16} /> },
     { id: 'data_categories', label: 'Data Categories', icon: <Database size={16} /> },
   ];
 
@@ -1908,6 +1989,254 @@ export default function OrgDashboard() {
       URL.revokeObjectURL(pdfUrl);
       setPdfUrl("");
     }
+  };
+
+  // Alerts functions
+  const fetchAlerts = async (resetPagination = false) => {
+    if (!orgIdToUse) return;
+    
+    setAlertsLoading(true);
+    setAlertsError("");
+    
+    try {
+      const api = createAxiosInstance();
+      const params = new URLSearchParams({
+        limit: alertsPagination.limit.toString(),
+        offset: resetPagination ? '0' : alertsPagination.offset.toString(),
+        ...(alertsFilters.alert_type && { alert_type: alertsFilters.alert_type }),
+        ...(alertsFilters.severity && { severity: alertsFilters.severity }),
+        ...(alertsFilters.is_read !== null && { is_read: alertsFilters.is_read.toString() })
+      });
+      
+      const response = await api.get(`/alerts/org/${orgIdToUse}?${params}`);
+      
+      setAlerts(response.data.alerts);
+      setAlertsPagination(prev => ({
+        ...prev,
+        total: response.data.total_count,
+        offset: resetPagination ? 0 : prev.offset,
+        hasMore: response.data.has_more
+      }));
+    } catch (err) {
+      console.error('Error fetching alerts:', err);
+      setAlertsError('Failed to fetch alerts');
+      setAlerts([]);
+    } finally {
+      setAlertsLoading(false);
+    }
+  };
+
+  const fetchUnreadAlertsCount = async () => {
+    if (!orgIdToUse) return;
+    
+    try {
+      const api = createAxiosInstance();
+      const response = await api.get(`/alerts/org/${orgIdToUse}/unread-count`);
+      setUnreadAlertsCount(response.data.unread_count);
+    } catch (err) {
+      console.error('Error fetching unread alerts count:', err);
+    }
+  };
+
+  const handleMarkAlertAsRead = async (alertId) => {
+    console.log('Marking alert as read:', alertId);
+    try {
+      const api = createAxiosInstance();
+      const response = await api.put(`/alerts/${alertId}/mark-read`);
+      
+      if (response.status === 200) {
+        // Update the alert in the list
+        setAlerts(prev => prev.map(alert => 
+          alert.id === alertId 
+            ? { ...alert, is_read: true, resolved_at: new Date().toISOString() }
+            : alert
+        ));
+        
+        // Refresh unread count
+        fetchUnreadAlertsCount();
+        
+        // Show success message
+        console.log(`Alert ${alertId} marked as read successfully`);
+      }
+    } catch (err) {
+      console.error('Error marking alert as read:', err);
+      console.error('Error details:', err.response?.data);
+      alert(`Failed to mark alert as read: ${err.response?.data?.detail || err.message}`);
+    }
+  };
+
+  const handleDeleteAlert = async (alertId) => {
+    if (!confirm('Are you sure you want to delete this alert? This action cannot be undone.')) {
+      return;
+    }
+    
+    console.log('Deleting alert:', alertId);
+    try {
+      const api = createAxiosInstance();
+      const response = await api.delete(`/alerts/${alertId}`);
+      
+      if (response.status === 200) {
+        // Remove the alert from the list
+        setAlerts(prev => prev.filter(alert => alert.id !== alertId));
+        
+        // Refresh unread count
+        fetchUnreadAlertsCount();
+        
+        // Show success message
+        console.log(`Alert ${alertId} deleted successfully`);
+      }
+    } catch (err) {
+      console.error('Error deleting alert:', err);
+      console.error('Error details:', err.response?.data);
+      alert(`Failed to delete alert: ${err.response?.data?.detail || err.message}`);
+    }
+  };
+
+  const handleMarkAllAlertsAsRead = async () => {
+    if (!orgIdToUse) return;
+    
+    try {
+      const api = createAxiosInstance();
+      await api.put(`/alerts/org/${orgIdToUse}/mark-all-read`);
+      
+      // Update all alerts in the list
+      setAlerts(prev => prev.map(alert => ({
+        ...alert,
+        is_read: true,
+        resolved_at: new Date().toISOString()
+      })));
+      
+      // Reset unread count
+      setUnreadAlertsCount(0);
+    } catch (err) {
+      console.error('Error marking all alerts as read:', err);
+    }
+  };
+
+  const handleAlertsFilterChange = (field, value) => {
+    setAlertsFilters(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleAlertsPageChange = (newOffset) => {
+    setAlertsPagination(prev => ({ ...prev, offset: newOffset }));
+  };
+
+  const handleCheckSuspiciousActivity = async () => {
+    try {
+      const api = createAxiosInstance();
+      await api.post('/alerts/check-suspicious-activity');
+      
+      // Refresh alerts after checking
+      fetchAlerts(true);
+      fetchUnreadAlertsCount();
+    } catch (err) {
+      console.error('Error checking suspicious activity:', err);
+    }
+  };
+
+  // IP blocking functions
+  const handleBlockIP = async (ipAddress) => {
+    if (!ipAddress || ipAddress === 'N/A') return;
+    
+    setBlockingIP(true);
+    try {
+      const api = createAxiosInstance();
+      await api.post('/alerts/block-ip', { ip_address: ipAddress });
+      
+      // Add to blocked IPs list
+      setBlockedIPs(prev => [...prev, ipAddress]);
+      
+      // Show success message
+      alert(`IP address ${ipAddress} has been blocked successfully.`);
+    } catch (err) {
+      console.error('Error blocking IP:', err);
+      alert('Failed to block IP address. Please try again.');
+    } finally {
+      setBlockingIP(false);
+    }
+  };
+
+  const handleUnblockIP = async (ipAddress) => {
+    try {
+      const api = createAxiosInstance();
+      await api.delete(`/alerts/unblock-ip/${ipAddress}`);
+      
+      // Remove from blocked IPs list
+      setBlockedIPs(prev => prev.filter(ip => ip !== ipAddress));
+      
+      // Show success message
+      alert(`IP address ${ipAddress} has been unblocked successfully.`);
+    } catch (err) {
+      console.error('Error unblocking IP:', err);
+      alert('Failed to unblock IP address. Please try again.');
+    }
+  };
+
+  const fetchBlockedIPs = async () => {
+    try {
+      const api = createAxiosInstance();
+      const response = await api.get('/alerts/blocked-ips');
+      setBlockedIPs(response.data.blocked_ips || []);
+    } catch (err) {
+      console.error('Error fetching blocked IPs:', err);
+    }
+  };
+
+  // Alerts popup functions
+  const checkForAlertsOnLogin = async () => {
+    if (!orgIdToUse) return;
+    
+    try {
+      const api = createAxiosInstance();
+      const response = await api.get(`/alerts/org/${orgIdToUse}?limit=5&is_read=false`);
+      
+      if (response.data.alerts && response.data.alerts.length > 0) {
+        setRecentAlerts(response.data.alerts);
+        setShowAlertsPopup(true);
+      }
+    } catch (err) {
+      console.error('Error checking for alerts on login:', err);
+    }
+  };
+
+  const handleCloseAlertsPopup = () => {
+    setShowAlertsPopup(false);
+    setRecentAlerts([]);
+  };
+
+  const handleGoToAlerts = () => {
+    setActiveTab('alerts');
+    setShowAlertsPopup(false);
+  };
+
+  // Audit logs pagination functions
+  const fetchAuditLogs = async (resetPagination = false) => {
+    if (!orgIdToUse) return;
+    
+    try {
+      const api = createAxiosInstance();
+      const params = new URLSearchParams({
+        limit: auditLogsPagination.limit.toString(),
+        offset: resetPagination ? '0' : auditLogsPagination.offset.toString()
+      });
+      
+      const response = await api.get(`/audit/org/${orgIdToUse}?${params}`);
+      
+      setAuditLogs(response.data.logs);
+      setAuditLogsPagination(prev => ({
+        ...prev,
+        total: response.data.total_count,
+        offset: resetPagination ? 0 : prev.offset,
+        hasMore: response.data.has_more
+      }));
+    } catch (err) {
+      console.error('Error fetching audit logs:', err);
+      setAuditLogs([]);
+    }
+  };
+
+  const handleAuditLogsPageChange = (newOffset) => {
+    setAuditLogsPagination(prev => ({ ...prev, offset: newOffset }));
   };
 
 
@@ -2761,23 +3090,30 @@ export default function OrgDashboard() {
                   }
                   
                   return (
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr style={{ background: '#f3f4f6' }}>
-                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Type</th>
-                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Contract ID</th>
-                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Contract Name</th>
-                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Organization</th>
-                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Resources</th>
-                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Purpose</th>
-                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Retention</th>
-                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Status</th>
-                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Created</th>
-                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Expires</th>
-                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                    <div style={{ 
+                      maxHeight: '600px', 
+                      overflowY: 'auto', 
+                      overflowX: 'auto',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px'
+                    }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '1200px' }}>
+                        <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+                          <tr style={{ background: '#f3f4f6' }}>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', background: '#f3f4f6' }}>Type</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', background: '#f3f4f6' }}>Contract ID</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', background: '#f3f4f6' }}>Contract Name</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', background: '#f3f4f6' }}>Organization</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', background: '#f3f4f6' }}>Resources</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', background: '#f3f4f6' }}>Purpose</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', background: '#f3f4f6' }}>Retention</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', background: '#f3f4f6' }}>Status</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', background: '#f3f4f6' }}>Created</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', background: '#f3f4f6' }}>Expires</th>
+                            <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left', background: '#f3f4f6' }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
                         {filteredContracts.map((contract, idx) => (
                           <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
                             <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
@@ -3049,6 +3385,7 @@ export default function OrgDashboard() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   );
                 })()}
               </div>
@@ -3150,7 +3487,457 @@ export default function OrgDashboard() {
                     <div style={{ fontSize: '0.875rem' }}>No audit logs have been generated for this organization yet.</div>
                   </div>
                 ) : (
-                  <AuditLogTable logs={auditLogs} />
+                  <div>
+                    <AuditLogTable logs={auditLogs} />
+                    
+                    {/* Pagination */}
+                    {auditLogsPagination.total > auditLogsPagination.limit && (
+                      <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'center', 
+                        padding: '1rem',
+                        background: 'rgba(255, 255, 255, 0.8)',
+                        borderTop: '1px solid #e5e7eb'
+                      }}>
+                        <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                          Showing {auditLogsPagination.offset + 1} to {Math.min(auditLogsPagination.offset + auditLogsPagination.limit, auditLogsPagination.total)} of {auditLogsPagination.total} logs
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button
+                            onClick={() => handleAuditLogsPageChange(Math.max(0, auditLogsPagination.offset - auditLogsPagination.limit))}
+                            disabled={auditLogsPagination.offset === 0}
+                            style={{
+                              padding: '0.5rem 1rem',
+                              border: '1px solid #e5e7eb',
+                              borderRadius: '6px',
+                              background: 'white',
+                              cursor: auditLogsPagination.offset === 0 ? 'not-allowed' : 'pointer',
+                              opacity: auditLogsPagination.offset === 0 ? 0.5 : 1
+                            }}
+                          >
+                            Previous
+                          </button>
+                          <button
+                            onClick={() => handleAuditLogsPageChange(auditLogsPagination.offset + auditLogsPagination.limit)}
+                            disabled={!auditLogsPagination.hasMore}
+                            style={{
+                              padding: '0.5rem 1rem',
+                              border: '1px solid #e5e7eb',
+                              borderRadius: '6px',
+                              background: 'white',
+                              cursor: auditLogsPagination.hasMore ? 'pointer' : 'not-allowed',
+                              opacity: auditLogsPagination.hasMore ? 1 : 0.5
+                            }}
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {activeTab === 'alerts' && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                <AlertCircle size={24} style={{ color: '#dc2626' }} />
+                <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>Security Alerts</h2>
+                <div style={{ 
+                  padding: '0.25rem 0.75rem', 
+                  background: 'rgba(220, 38, 38, 0.1)', 
+                  color: '#dc2626', 
+                  borderRadius: '12px', 
+                  fontSize: '0.75rem', 
+                  fontWeight: '600' 
+                }}>
+                  Suspicious Activity Detection
+                </div>
+                {unreadAlertsCount > 0 && (
+                  <div style={{ 
+                    padding: '0.25rem 0.75rem', 
+                    background: '#dc2626', 
+                    color: 'white', 
+                    borderRadius: '12px', 
+                    fontSize: '0.75rem', 
+                    fontWeight: '600' 
+                  }}>
+                    {unreadAlertsCount} New
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
+                {unreadAlertsCount > 0 && (
+                  <button
+                    onClick={handleMarkAllAlertsAsRead}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      padding: '0.75rem 1.5rem',
+                      background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: '0.875rem',
+                      fontWeight: '600'
+                    }}
+                  >
+                    <CheckCircle size={16} />
+                    Mark All as Read
+                  </button>
+                )}
+              </div>
+
+              {/* Filters */}
+              <div style={{ 
+                background: 'white', 
+                borderRadius: '12px', 
+                padding: '1.5rem', 
+                marginBottom: '1.5rem',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.03)' 
+              }}>
+                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div style={{ minWidth: '150px' }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', fontSize: '0.875rem' }}>
+                      Alert Type
+                    </label>
+                    <select
+                      value={alertsFilters.alert_type}
+                      onChange={(e) => handleAlertsFilterChange('alert_type', e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        fontSize: '0.875rem'
+                      }}
+                    >
+                      <option value="">All Types</option>
+                      <option value="failed_login">Failed Login</option>
+                      <option value="multiple_requests">Multiple Requests</option>
+                      <option value="foreign_access">Foreign Access</option>
+                      <option value="suspicious_activity">Suspicious Activity</option>
+                      <option value="data_breach">Data Breach</option>
+                      <option value="unusual_pattern">Unusual Pattern</option>
+                    </select>
+                  </div>
+                  
+                  <div style={{ minWidth: '150px' }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', fontSize: '0.875rem' }}>
+                      Severity
+                    </label>
+                    <select
+                      value={alertsFilters.severity}
+                      onChange={(e) => handleAlertsFilterChange('severity', e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        fontSize: '0.875rem'
+                      }}
+                    >
+                      <option value="">All Severities</option>
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="critical">Critical</option>
+                    </select>
+                  </div>
+                  
+                  <div style={{ minWidth: '150px' }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', fontSize: '0.875rem' }}>
+                      Status
+                    </label>
+                    <select
+                      value={alertsFilters.is_read === null ? "" : alertsFilters.is_read.toString()}
+                      onChange={(e) => handleAlertsFilterChange('is_read', e.target.value === "" ? null : e.target.value === "true")}
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        fontSize: '0.875rem'
+                      }}
+                    >
+                      <option value="">All Alerts</option>
+                      <option value="false">Unread</option>
+                      <option value="true">Read</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Blocked IPs Section */}
+              <div style={{ 
+                background: 'white', 
+                borderRadius: '12px', 
+                padding: '1.5rem', 
+                marginBottom: '1.5rem',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.03)' 
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                  <Shield size={20} style={{ color: '#dc2626' }} />
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: '600', margin: 0 }}>Blocked IP Addresses</h3>
+                </div>
+                
+                {blockedIPs.length === 0 ? (
+                  <p style={{ color: '#6b7280', fontSize: '0.875rem', margin: 0 }}>
+                    No IP addresses are currently blocked.
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    {blockedIPs.map((ip, index) => (
+                      <div key={index} style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.5rem 0.75rem',
+                        background: '#fee2e2',
+                        border: '1px solid #fecaca',
+                        borderRadius: '8px',
+                        fontSize: '0.875rem'
+                      }}>
+                        <span style={{ color: '#dc2626', fontWeight: '500' }}>{ip}</span>
+                        <button
+                          onClick={() => handleUnblockIP(ip)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#dc2626',
+                            cursor: 'pointer',
+                            fontSize: '0.75rem',
+                            padding: '0.25rem'
+                          }}
+                          title="Unblock IP"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Alerts List */}
+              <div style={{ 
+                background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.95) 100%)',
+                backdropFilter: 'blur(10px)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: '16px',
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+                overflow: 'hidden'
+              }}>
+                {alertsLoading ? (
+                  <div style={{ 
+                    padding: '2rem', 
+                    textAlign: 'center', 
+                    color: '#6b7280',
+                    background: 'rgba(255, 255, 255, 0.8)'
+                  }}>
+                    <div style={{ fontSize: '1rem', fontWeight: '500' }}>Loading alerts...</div>
+                  </div>
+                ) : alertsError ? (
+                  <div style={{ 
+                    padding: '2rem', 
+                    textAlign: 'center', 
+                    color: '#dc2626',
+                    background: 'rgba(255, 255, 255, 0.8)'
+                  }}>
+                    <div style={{ fontSize: '1rem', fontWeight: '500' }}>Error: {alertsError}</div>
+                  </div>
+                ) : !Array.isArray(alerts) || alerts.length === 0 ? (
+                  <div style={{ 
+                    padding: '2rem', 
+                    textAlign: 'center', 
+                    color: '#6b7280',
+                    background: 'rgba(255, 255, 255, 0.8)'
+                  }}>
+                    <AlertCircle size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                    <div style={{ fontSize: '1rem', fontWeight: '500', marginBottom: '0.5rem' }}>No Alerts Found</div>
+                    <div style={{ fontSize: '0.875rem' }}>No security alerts have been generated for this organization yet.</div>
+                  </div>
+                ) : (
+                  <div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: '#f3f4f6' }}>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Type</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Severity</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Description</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Location</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>IP Address</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Created</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Status</th>
+                          <th style={{ padding: '0.75rem', border: '1px solid #e5e7eb', textAlign: 'left' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {alerts.map((alert, idx) => (
+                          <tr key={idx} style={{ 
+                            borderBottom: '1px solid #f3f4f6',
+                            background: alert.is_read ? 'white' : 'rgba(220, 38, 38, 0.05)'
+                          }}>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <AlertTriangle size={16} style={{ 
+                                  color: alert.severity === 'critical' ? '#dc2626' : 
+                                         alert.severity === 'high' ? '#ea580c' : 
+                                         alert.severity === 'medium' ? '#d97706' : '#059669'
+                                }} />
+                                {alert.alert_type_display}
+                              </div>
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                              <span style={{
+                                padding: '0.25rem 0.5rem',
+                                borderRadius: '12px',
+                                fontSize: '0.75rem',
+                                fontWeight: '500',
+                                background: alert.severity === 'critical' ? '#fee2e2' : 
+                                           alert.severity === 'high' ? '#fed7aa' : 
+                                           alert.severity === 'medium' ? '#fef3c7' : '#d1fae5',
+                                color: alert.severity === 'critical' ? '#dc2626' : 
+                                       alert.severity === 'high' ? '#ea580c' : 
+                                       alert.severity === 'medium' ? '#d97706' : '#059669'
+                              }}>
+                                {alert.severity}
+                              </span>
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                              {alert.description}
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                              {alert.location?.city}, {alert.location?.country}
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                              {alert.ip_address || 'N/A'}
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                              {new Date(alert.created_at).toLocaleString()}
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                              <span style={{
+                                padding: '0.25rem 0.5rem',
+                                borderRadius: '12px',
+                                fontSize: '0.75rem',
+                                fontWeight: '500',
+                                background: alert.is_read ? '#d1fae5' : '#fee2e2',
+                                color: alert.is_read ? '#059669' : '#dc2626'
+                              }}>
+                                {alert.is_read ? 'Read' : 'Unread'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '0.75rem', border: '1px solid #e5e7eb', fontSize: '0.875rem' }}>
+                              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                {!alert.is_read && (
+                                  <button
+                                    onClick={() => handleMarkAlertAsRead(alert.id)}
+                                    style={{
+                                      background: '#10b981',
+                                      color: 'white',
+                                      border: 'none',
+                                      borderRadius: '6px',
+                                      padding: '0.5rem 0.75rem',
+                                      cursor: 'pointer',
+                                      fontSize: '0.75rem',
+                                      fontWeight: '500'
+                                    }}
+                                  >
+                                    Mark Read
+                                  </button>
+                                )}
+                                {alert.ip_address && alert.ip_address !== 'N/A' && (
+                                  <button
+                                    onClick={() => handleBlockIP(alert.ip_address)}
+                                    style={{
+                                      background: '#dc2626',
+                                      color: 'white',
+                                      border: 'none',
+                                      borderRadius: '6px',
+                                      padding: '0.5rem 0.75rem',
+                                      cursor: 'pointer',
+                                      fontSize: '0.75rem',
+                                      fontWeight: '500'
+                                    }}
+                                  >
+                                    Block IP
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleDeleteAlert(alert.id)}
+                                  style={{
+                                    background: '#6b7280',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    padding: '0.5rem 0.75rem',
+                                    cursor: 'pointer',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '500'
+                                  }}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+
+                    {/* Pagination */}
+                    {alertsPagination.total > alertsPagination.limit && (
+                      <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'center', 
+                        padding: '1rem',
+                        background: 'rgba(255, 255, 255, 0.8)',
+                        borderTop: '1px solid #e5e7eb'
+                      }}>
+                        <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                          Showing {alertsPagination.offset + 1} to {Math.min(alertsPagination.offset + alertsPagination.limit, alertsPagination.total)} of {alertsPagination.total} alerts
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button
+                            onClick={() => handleAlertsPageChange(Math.max(0, alertsPagination.offset - alertsPagination.limit))}
+                            disabled={alertsPagination.offset === 0}
+                            style={{
+                              padding: '0.5rem 1rem',
+                              border: '1px solid #e5e7eb',
+                              borderRadius: '6px',
+                              background: 'white',
+                              cursor: alertsPagination.offset === 0 ? 'not-allowed' : 'pointer',
+                              opacity: alertsPagination.offset === 0 ? 0.5 : 1
+                            }}
+                          >
+                            Previous
+                          </button>
+                          <button
+                            onClick={() => handleAlertsPageChange(alertsPagination.offset + alertsPagination.limit)}
+                            disabled={!alertsPagination.hasMore}
+                            style={{
+                              padding: '0.5rem 1rem',
+                              border: '1px solid #e5e7eb',
+                              borderRadius: '6px',
+                              background: 'white',
+                              cursor: alertsPagination.hasMore ? 'pointer' : 'not-allowed',
+                              opacity: alertsPagination.hasMore ? 1 : 0.5
+                            }}
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -6337,6 +7124,137 @@ export default function OrgDashboard() {
                 <li>Developer tools access prevented</li>
                 <li>All access attempts logged for audit</li>
               </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Alerts Popup Modal */}
+      {showAlertsPopup && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '16px',
+            padding: '2rem',
+            maxWidth: '600px',
+            width: '90%',
+            maxHeight: '80vh',
+            overflow: 'auto',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem' }}>
+              <AlertCircle size={24} style={{ color: '#dc2626' }} />
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0, color: '#dc2626' }}>
+                Security Alerts Detected
+              </h2>
+            </div>
+
+            <div style={{ 
+              background: 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
+              border: '1px solid #fecaca',
+              borderRadius: '12px',
+              padding: '1rem',
+              marginBottom: '1.5rem'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <AlertTriangle size={16} style={{ color: '#dc2626' }} />
+                <strong style={{ color: '#dc2626' }}>⚠️ Security Notice</strong>
+              </div>
+              <p style={{ margin: 0, fontSize: '0.875rem', color: '#991b1b' }}>
+                {recentAlerts.length} unread security alert{recentAlerts.length > 1 ? 's' : ''} have been detected for your organization. 
+                Please review them immediately.
+              </p>
+            </div>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem' }}>Recent Alerts:</h3>
+              <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                {recentAlerts.map((alert, index) => (
+                  <div key={index} style={{
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    padding: '1rem',
+                    marginBottom: '0.5rem',
+                    background: 'rgba(220, 38, 38, 0.05)'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                      <AlertTriangle size={14} style={{ 
+                        color: alert.severity === 'critical' ? '#dc2626' : 
+                               alert.severity === 'high' ? '#ea580c' : 
+                               alert.severity === 'medium' ? '#d97706' : '#059669'
+                      }} />
+                      <span style={{ fontWeight: '600', fontSize: '0.875rem' }}>
+                        {alert.alert_type_display}
+                      </span>
+                      <span style={{
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '12px',
+                        fontSize: '0.75rem',
+                        fontWeight: '500',
+                        background: alert.severity === 'critical' ? '#fee2e2' : 
+                                   alert.severity === 'high' ? '#fed7aa' : 
+                                   alert.severity === 'medium' ? '#fef3c7' : '#d1fae5',
+                        color: alert.severity === 'critical' ? '#dc2626' : 
+                               alert.severity === 'high' ? '#ea580c' : 
+                               alert.severity === 'medium' ? '#d97706' : '#059669'
+                      }}>
+                        {alert.severity}
+                      </span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: '0.875rem', color: '#374151' }}>
+                      {alert.description}
+                    </p>
+                    <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                      IP: {alert.ip_address || 'N/A'} | Location: {alert.location?.city}, {alert.location?.country} | 
+                      Time: {new Date(alert.created_at).toLocaleString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+              <button
+                onClick={handleCloseAlertsPopup}
+                style={{
+                  padding: '0.75rem 1.5rem',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  background: 'white',
+                  color: '#374151',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: '500'
+                }}
+              >
+                Dismiss
+              </button>
+              <button
+                onClick={handleGoToAlerts}
+                style={{
+                  padding: '0.75rem 1.5rem',
+                  border: 'none',
+                  borderRadius: '8px',
+                  background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                  color: 'white',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: '600'
+                }}
+              >
+                View All Alerts
+              </button>
             </div>
           </div>
         </div>

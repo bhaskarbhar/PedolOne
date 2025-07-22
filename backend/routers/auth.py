@@ -20,7 +20,7 @@ from models import (
     UserPIIEntry, UserPIIMap, PIIInput
 )
 from jwt_utils import create_access_token, get_current_user, get_token_expiry_time
-from helpers import users_collection, user_pii_collection, encrypt_pii, decrypt_pii, validate_password_strength
+from helpers import users_collection, user_pii_collection, encrypt_pii, decrypt_pii, validate_password_strength, logs_collection, get_client_ip
 from routers.pii_tokenizer import tokenize_aadhaar, tokenize_pan
 
 # Load environment variables
@@ -63,6 +63,41 @@ def generate_otp() -> str:
 def generate_verification_token() -> str:
     """Generate secure verification token"""
     return str(uuid.uuid4())
+
+async def log_failed_login_attempt(email: str, ip_address: str, request: Request = None):
+    """Log failed login attempt and check for suspicious activity"""
+    try:
+        # Get IP address if not provided
+        if not ip_address and request:
+            ip_address = get_client_ip(request)
+        
+        # Find user by email
+        user = users_collection.find_one({"email": email})
+        user_id = user.get("userid") if user else None
+        org_id = user.get("organization_id") if user else None
+        
+        # Log the failed attempt
+        log_entry = {
+            "user_id": user_id,
+            "email": email,
+            "ip_address": ip_address,
+            "log_type": "login_failed",
+            "description": f"Failed login attempt for email: {email}",
+            "created_at": datetime.utcnow(),
+            "organization_id": org_id
+        }
+        
+        logs_collection.insert_one(log_entry)
+        print(f"🔴 Logged failed login attempt for {email} from IP: {ip_address}")
+        
+        # If user exists and has organization, check for suspicious activity
+        if user_id and org_id:
+            # Import here to avoid circular imports
+            from routers.alerts import check_failed_login_attempts
+            await check_failed_login_attempts(org_id, user_id, ip_address)
+            
+    except Exception as e:
+        print(f"Error logging failed login attempt: {e}")
 
 async def send_verification_email(email: str, token: str, user_type: str = "individual") -> tuple[bool, str]:
     """Send verification email with link"""
@@ -352,15 +387,19 @@ async def verify_otp(verification_data: OTPVerification):
     }
 
 @router.post("/login", response_model=LoginResponse)
-async def login_user(login_data: UserLogin):
+async def login_user(login_data: UserLogin, request: Request):
     """Login user and initiate verification"""
     
     user = users_collection.find_one({"email": login_data.email})
     if not user:
+        # Log failed login attempt
+        await log_failed_login_attempt(login_data.email, None, request)
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
     # Verify password
     if not verify_password(login_data.password, user["password_hash"]):
+        # Log failed login attempt
+        await log_failed_login_attempt(login_data.email, None, request)
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
     # Check if user email is verified
