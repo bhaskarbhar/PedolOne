@@ -143,6 +143,13 @@ export default function OrgDashboard() {
     approval_message: ""
   });
   
+  // PDF viewer modal state
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [selectedFileId, setSelectedFileId] = useState("");
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState("");
+  const [pdfUrl, setPdfUrl] = useState("");
+  
   // Contract deletion form state
   const [deleteContractForm, setDeleteContractForm] = useState({
     deletion_reason: "",
@@ -893,7 +900,48 @@ export default function OrgDashboard() {
       setCreateContractLoading(false);
       return;
     }
-    if (contractForm.resources_allowed.length === 0) {
+    
+    // For file sharing contracts, automatically add default resources
+    let finalResources = contractForm.resources_allowed;
+    if (contractForm.contract_type === "file_sharing" && contractForm.resources_allowed.length === 0) {
+      finalResources = [
+        {
+          resource_name: "excel",
+          purpose: ["Document sharing", "Compliance reporting"],
+          retention_window: "90 days"
+        },
+        {
+          resource_name: "pdf",
+          purpose: ["Document sharing", "Compliance reporting"],
+          retention_window: "90 days"
+        },
+        {
+          resource_name: "doc",
+          purpose: ["Document sharing", "Compliance reporting"],
+          retention_window: "90 days"
+        },
+        {
+          resource_name: "docx",
+          purpose: ["Document sharing", "Compliance reporting"],
+          retention_window: "90 days"
+        },
+        {
+          resource_name: "csv",
+          purpose: ["Document sharing", "Compliance reporting"],
+          retention_window: "90 days"
+        },
+        {
+          resource_name: "json",
+          purpose: ["Document sharing", "Compliance reporting"],
+          retention_window: "90 days"
+        },
+        {
+          resource_name: "xml",
+          purpose: ["Document sharing", "Compliance reporting"],
+          retention_window: "90 days"
+        }
+      ];
+    } else if (contractForm.resources_allowed.length === 0) {
       setCreateContractError("Please add at least one resource");
       setCreateContractLoading(false);
       return;
@@ -907,7 +955,7 @@ export default function OrgDashboard() {
       const targetOrgName = targetOrg ? targetOrg.org_name : 'Unknown Organization';
       
       // Prepare resources with proper structure
-      const resourcesWithTimestamps = (contractForm.resources_allowed || []).map(resource => ({
+      const resourcesWithTimestamps = (finalResources || []).map(resource => ({
         resource_name: resource.resource_name,
         purpose: resource.purpose,
         retention_window: resource.retention_window,
@@ -1610,7 +1658,12 @@ export default function OrgDashboard() {
       const api = createAxiosInstance();
       const formData = new FormData();
       formData.append('rejection_reason', rejectionReason);
-      await api.post(`/file-sharing/reject-request/${requestId}`, formData);
+      // For FormData, we need to remove the Content-Type header so browser can set it with boundary
+      await api.post(`/file-sharing/reject-request/${requestId}`, formData, {
+        headers: {
+          'Content-Type': undefined
+        }
+      });
       window.location.reload();
     } catch (err) {
       console.error('Error rejecting file request:', err);
@@ -1660,7 +1713,12 @@ export default function OrgDashboard() {
         formData.append('file_description', fileDescription);
       }
 
-      await api.post(`/file-sharing/upload-file/${selectedFileRequest.request_id}`, formData);
+      // For file uploads, we need to remove the Content-Type header so browser can set it with boundary
+      await api.post(`/file-sharing/upload-file/${selectedFileRequest.request_id}`, formData, {
+        headers: {
+          'Content-Type': undefined
+        }
+      });
       
       setShowUploadFileModal(false);
       window.location.reload();
@@ -1785,7 +1843,18 @@ export default function OrgDashboard() {
         formData.append('expires_at', directShareForm.expires_at);
       }
 
-      const response = await api.post('/file-sharing/direct-share', formData);
+      // Debug: Log the FormData contents
+      console.log('🔍 [Frontend] FormData contents:');
+      for (let [key, value] of formData.entries()) {
+        console.log(`   - ${key}: ${value instanceof File ? value.name : value}`);
+      }
+
+      // For file uploads, we need to remove the Content-Type header so browser can set it with boundary
+      const response = await api.post('/file-sharing/direct-share', formData, {
+        headers: {
+          'Content-Type': undefined
+        }
+      });
       
       if (response.data && response.data.file_id) {
         console.log('File shared successfully:', response.data);
@@ -1804,10 +1873,41 @@ export default function OrgDashboard() {
     }
   };
 
-  const handleViewFile = (fileId) => {
-    const token = localStorage.getItem('token');
-    const url = `/file-sharing/view-file/${fileId}?token=${token}`;
-    window.open(url, '_blank', 'width=1200,height=800,scrollbars=yes,resizable=yes');
+  const handleViewFile = async (fileId) => {
+    setShowPdfModal(true);
+    setPdfLoading(true);
+    setPdfError("");
+    setSelectedFileId(fileId);
+    
+    try {
+      const api = createAxiosInstance();
+      const response = await api.get(`/file-sharing/view-file/${fileId}`, {
+        responseType: 'text'
+      });
+      
+      // Create a blob URL for the secure HTML content
+      const blob = new Blob([response.data], { 
+        type: 'text/html' 
+      });
+      const url = URL.createObjectURL(blob);
+      setPdfUrl(url);
+    } catch (err) {
+      console.error('Error loading PDF:', err);
+      const errorMessage = err.response?.data?.detail || err.response?.data?.message || 'Failed to load PDF';
+      setPdfError(typeof errorMessage === 'string' ? errorMessage : 'Failed to load PDF');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  const handleClosePdfModal = () => {
+    setShowPdfModal(false);
+    setPdfError("");
+    setSelectedFileId("");
+    if (pdfUrl) {
+      URL.revokeObjectURL(pdfUrl);
+      setPdfUrl("");
+    }
   };
 
 
@@ -3906,6 +4006,7 @@ export default function OrgDashboard() {
                 />
               </div>
 
+              {contractForm.contract_type !== "file_sharing" && (
               <div style={{ marginBottom: '1.5rem' }}>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
                   Add Resources to Contract
@@ -4001,7 +4102,29 @@ export default function OrgDashboard() {
                   </button>
                 )}
               </div>
+              )}
 
+              {contractForm.contract_type === "file_sharing" && (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <div style={{
+                    background: '#f0f9ff',
+                    border: '1px solid #0ea5e9',
+                    borderRadius: '8px',
+                    padding: '1rem',
+                    color: '#0c4a6e'
+                  }}>
+                    <div style={{ fontWeight: '500', marginBottom: '0.5rem' }}>
+                      File Sharing Contract
+                    </div>
+                    <div style={{ fontSize: '0.875rem' }}>
+                      This contract will automatically include all supported file types (Excel, PDF, DOC, DOCX, CSV, JSON, XML) 
+                      with 90-day retention period for document sharing and compliance reporting purposes.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {contractForm.contract_type !== "file_sharing" && (
               <div style={{ marginBottom: '1.5rem' }}>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
                   Contract Resources
@@ -4041,6 +4164,43 @@ export default function OrgDashboard() {
                   </div>
                 )}
               </div>
+              )}
+
+              {contractForm.contract_type === "file_sharing" && (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                    File Sharing Resources
+                  </label>
+                  <div style={{
+                    background: '#f0f9ff',
+                    border: '1px solid #0ea5e9',
+                    borderRadius: '8px',
+                    padding: '1rem'
+                  }}>
+                    <div style={{ fontWeight: '500', marginBottom: '0.5rem', color: '#0c4a6e' }}>
+                      Supported File Types:
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                      {['Excel', 'PDF', 'DOC', 'DOCX', 'CSV', 'JSON', 'XML'].map((fileType) => (
+                        <span key={fileType} style={{
+                          background: '#0ea5e9',
+                          color: 'white',
+                          padding: '0.25rem 0.75rem',
+                          borderRadius: '12px',
+                          fontSize: '0.75rem',
+                          fontWeight: '500'
+                        }}>
+                          {fileType}
+                        </span>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: '0.875rem', color: '#0c4a6e' }}>
+                      <strong>Retention:</strong> 90 days<br/>
+                      <strong>Purposes:</strong> Document sharing, Compliance reporting
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div style={{ marginBottom: '1.5rem' }}>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
@@ -4085,16 +4245,16 @@ export default function OrgDashboard() {
                 </button>
                 <button
                   type="submit"
-                  disabled={createContractLoading || contractForm.target_org_id === "" || contractForm.contract_name.trim() === "" || contractForm.resources_allowed.length === 0}
+                  disabled={createContractLoading || contractForm.target_org_id === "" || contractForm.contract_name.trim() === "" || (contractForm.contract_type !== "file_sharing" && contractForm.resources_allowed.length === 0)}
                   style={{
                     padding: '0.75rem 1.5rem',
                     border: 'none',
                     borderRadius: '8px',
-                    background: createContractLoading || contractForm.target_org_id === "" || contractForm.contract_name.trim() === "" || contractForm.resources_allowed.length === 0 
+                    background: createContractLoading || contractForm.target_org_id === "" || contractForm.contract_name.trim() === "" || (contractForm.contract_type !== "file_sharing" && contractForm.resources_allowed.length === 0)
                       ? '#9ca3af' 
                       : '#2563eb',
                     color: 'white',
-                    cursor: createContractLoading || contractForm.target_org_id === "" || contractForm.contract_name.trim() === "" || contractForm.resources_allowed.length === 0 
+                    cursor: createContractLoading || contractForm.target_org_id === "" || contractForm.contract_name.trim() === "" || (contractForm.contract_type !== "file_sharing" && contractForm.resources_allowed.length === 0)
                       ? 'not-allowed' 
                       : 'pointer',
                     fontSize: '0.875rem',
@@ -6065,6 +6225,119 @@ export default function OrgDashboard() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* PDF Viewer Modal */}
+      {showPdfModal && (
+        <div className="secure-modal" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0
+        }}>
+          <div className="secure-modal-content" style={{
+            padding: '2rem',
+            maxWidth: '90vw',
+            maxHeight: '90vh',
+            width: '1200px',
+            position: 'relative',
+            overflow: 'hidden'
+          }}>
+            <button 
+              onClick={handleClosePdfModal} 
+              style={{ 
+                position: 'absolute', 
+                top: 16, 
+                right: 16, 
+                background: 'none', 
+                border: 'none', 
+                fontSize: 20, 
+                cursor: 'pointer', 
+                color: '#6b7280' 
+              }}
+            >
+              <X size={20} />
+            </button>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#059669' }}>
+                🔒 Secure PDF Viewer
+              </h2>
+            </div>
+            
+            {pdfLoading ? (
+              <div style={{ textAlign: 'center', padding: '2rem' }}>
+                <div>Loading PDF file...</div>
+              </div>
+            ) : pdfError ? (
+              <div style={{ 
+                padding: '1rem', 
+                background: '#fee2e2', 
+                color: '#dc2626', 
+                borderRadius: '6px', 
+                fontSize: '0.875rem' 
+              }}>
+                {pdfError}
+              </div>
+            ) : pdfUrl ? (
+              <div style={{ height: '70vh', position: 'relative' }}>
+                <div className="security-warning" style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  padding: '1rem',
+                  fontSize: '0.875rem',
+                  zIndex: 10,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}>
+                  <span style={{ fontSize: '1.2rem' }}>⚠️</span>
+                  <div>
+                    <strong>SECURITY NOTICE:</strong> This is a read-only view. Copying, downloading, or editing is disabled for data protection.
+                    <br />
+                    <small style={{ opacity: 0.8 }}>Screenshots and screen recording are also prevented for enhanced security.</small>
+                  </div>
+                </div>
+                
+                <iframe
+                  src={pdfUrl}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    border: 'none',
+                    marginTop: '3rem'
+                  }}
+                  title="PDF Viewer"
+                />
+              </div>
+            ) : null}
+            
+            <div className="secure-card" style={{ 
+              marginTop: '1rem', 
+              padding: '1.5rem', 
+              background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
+              borderRadius: '12px', 
+              border: '1px solid #bae6fd',
+              fontSize: '0.875rem',
+              color: '#0c4a6e'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                <span style={{ fontSize: '1.2rem' }}>🛡️</span>
+                <strong>Security Features:</strong>
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
+                <li>Text selection and copying disabled</li>
+                <li>Right-click context menu disabled</li>
+                <li>Print screen and keyboard shortcuts blocked</li>
+                <li>Developer tools access prevented</li>
+                <li>All access attempts logged for audit</li>
+              </ul>
+            </div>
           </div>
         </div>
       )}

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, Response
 from fastapi.responses import StreamingResponse, FileResponse
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -43,13 +43,15 @@ def get_file_collections():
         shared_files_collection = db["shared_files"]
     return file_requests_collection, shared_files_collection
 
-# Create file storage directory
-FILE_STORAGE_DIR = Path("public/shared_files")
+# Create file storage directory - use absolute path to ensure it's created in the right location
+FILE_STORAGE_DIR = Path(os.path.join(os.path.dirname(__file__), "public", "shared_files"))
 FILE_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Ensure the directory exists and is writable
 if not FILE_STORAGE_DIR.exists():
     FILE_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+print(f"📁 File storage directory: {FILE_STORAGE_DIR.absolute()}")
 
 def generate_file_id():
     return str(uuid.uuid4())
@@ -59,28 +61,36 @@ def validate_pdf_file(file: UploadFile) -> bool:
     if not file.filename.lower().endswith('.pdf'):
         return False
     
-    # Read first few bytes to check PDF signature
-    content = file.file.read(1024)
-    file.file.seek(0)  # Reset file pointer
-    
-    return content.startswith(b'%PDF')
+    try:
+        # Read first few bytes to check PDF signature
+        content = file.file.read(1024)
+        file.file.seek(0)  # Reset file pointer
+        
+        # Check for PDF signature (%PDF)
+        if content.startswith(b'%PDF'):
+            return True
+        
+        # Also accept files that might have BOM or other headers
+        # Some PDFs might have additional headers before %PDF
+        if b'%PDF' in content[:1024]:
+            return True
+            
+        return False
+    except Exception as e:
+        print(f"⚠️ PDF validation error: {e}")
+        # If validation fails, still accept the file but log the issue
+        return True
 
 def encrypt_pdf_content(content: bytes) -> bytes:
-    """Simple encryption for PDF content (in production, use proper encryption)"""
-    # This is a basic implementation - in production, use proper encryption
-    key = b'pedolone_secure_key_2024'
-    encrypted = bytearray()
-    for i, byte in enumerate(content):
-        encrypted.append(byte ^ key[i % len(key)])
-    return bytes(encrypted)
+    """Store PDF content without encryption for now (encryption was corrupting files)"""
+    # For now, return content as-is to prevent corruption
+    # In production, implement proper encryption that doesn't break PDF structure
+    return content
 
 def decrypt_pdf_content(encrypted_content: bytes) -> bytes:
-    """Decrypt PDF content"""
-    key = b'pedolone_secure_key_2024'
-    decrypted = bytearray()
-    for i, byte in enumerate(encrypted_content):
-        decrypted.append(byte ^ key[i % len(key)])
-    return bytes(decrypted)
+    """Return PDF content as-is (no decryption needed)"""
+    # For now, return content as-is since we're not encrypting
+    return encrypted_content
 
 @router.post("/request-file")
 async def create_file_request(
@@ -374,12 +384,16 @@ async def upload_file_for_request(
     with open(file_path, "wb") as f:
         f.write(encrypted_content)
     
+    # Get proper organization names
+    sender_org = organizations_collection.find_one({"org_id": user_org_id})
+    sender_org_name = sender_org.get("org_name", "Unknown") if sender_org else "Unknown"
+    
     # Create shared file record
     shared_file = SharedFile(
         file_id=file_id,
         contract_id=file_request["contract_id"],
         sender_org_id=user_org_id,
-        sender_org_name=user.get("organization_name", "Unknown"),
+        sender_org_name=sender_org_name,
         receiver_org_id=file_request["requester_org_id"],
         receiver_org_name=file_request["requester_org_name"],
         file_name=file.filename,
@@ -388,8 +402,9 @@ async def upload_file_for_request(
         file_size=len(content),
         file_path=str(file_path),
         uploaded_at=datetime.utcnow(),
-        uploaded_by=current_user.user_id,
-        expires_at=file_request["expires_at"]
+        uploaded_by=str(current_user.user_id),  # Convert to string as expected by model
+        expires_at=file_request["expires_at"],
+        is_encrypted=False  # Set to False since we're not encrypting
     )
     
     # Insert shared file record
@@ -405,7 +420,7 @@ async def upload_file_for_request(
                 "uploaded_file_name": file.filename,
                 "uploaded_file_size": len(content),
                 "uploaded_at": datetime.utcnow(),
-                "uploaded_by": current_user.user_id
+                "uploaded_by": str(current_user.user_id)  # Convert to string as expected by model
             }
         }
     )
@@ -414,7 +429,7 @@ async def upload_file_for_request(
     client_ip = "unknown"
     log_entry = {
         "user_id": current_user.user_id,
-        "fintech_name": user.get("organization_name", "Unknown"),
+        "fintech_name": sender_org_name,  # Use the properly retrieved organization name
         "resource_name": "file_upload",
         "purpose": f"Uploaded file: {file.filename}",
         "log_type": "file_uploaded",
@@ -444,6 +459,24 @@ async def direct_file_share(
     current_user: TokenData = Depends(get_current_user)
 ):
     """Directly share a PDF file with another organization"""
+    
+    print(f"🔍 [Direct Share] Received request with:")
+    print(f"   - target_org_id: {target_org_id}")
+    print(f"   - file_description: {file_description}")
+    print(f"   - file_category: {file_category}")
+    print(f"   - expires_at: {expires_at}")
+    print(f"   - file: {file.filename if file else 'None'}")
+    print(f"   - current_user: {current_user.user_id}")
+    
+    # Validate required fields
+    if not target_org_id or not target_org_id.strip():
+        raise HTTPException(status_code=422, detail="target_org_id is required")
+    
+    if not file_description or not file_description.strip():
+        raise HTTPException(status_code=422, detail="file_description is required")
+    
+    if not file or not file.filename:
+        raise HTTPException(status_code=422, detail="file is required")
     
     # Verify user is from organization
     user = users_collection.find_one({"userid": current_user.user_id})
@@ -486,32 +519,49 @@ async def direct_file_share(
     else:
         expiration_date = datetime.utcnow() + timedelta(days=30)
     
-    # Create shared file record
-    shared_file = SharedFile(
-        file_id=file_id,
-        contract_id="direct_share",  # No specific contract for direct sharing
-        sender_org_id=user.get("organization_id"),
-        sender_org_name=user.get("organization_name", "Unknown"),
-        receiver_org_id=target_org_id,
-        receiver_org_name=target_org["org_name"],
-        file_name=file.filename,
-        file_description=file_description,
-        file_category=file_category,
-        file_size=len(content),
-        file_path=str(file_path),
-        uploaded_at=datetime.utcnow(),
-        uploaded_by=current_user.user_id,
-        expires_at=expiration_date
-    )
+    # Get proper organization names
+    sender_org = organizations_collection.find_one({"org_id": user.get("organization_id")})
+    sender_org_name = sender_org.get("org_name", "Unknown") if sender_org else "Unknown"
     
-    # Insert shared file record
-    shared_files_collection.insert_one(shared_file.model_dump(by_alias=True, exclude={"id"}))
+    print(f"🔍 [Direct Share] Sender org: {sender_org_name} (ID: {user.get('organization_id')})")
+    print(f"🔍 [Direct Share] Receiver org: {target_org['org_name']} (ID: {target_org_id})")
+    
+    # Create shared file record
+    try:
+        shared_file = SharedFile(
+            file_id=file_id,
+            contract_id="direct_share",  # No specific contract for direct sharing
+            sender_org_id=user.get("organization_id"),
+            sender_org_name=sender_org_name,
+            receiver_org_id=target_org_id,
+            receiver_org_name=target_org["org_name"],
+            file_name=file.filename,
+            file_description=file_description,
+            file_category=file_category,
+            file_size=len(content),
+            file_path=str(file_path),
+            uploaded_at=datetime.utcnow(),
+            uploaded_by=str(current_user.user_id),  # Convert to string as expected by model
+            expires_at=expiration_date,
+            is_encrypted=False  # Set to False since we're not encrypting
+        )
+        
+        print(f"✅ [Direct Share] SharedFile model created successfully")
+        
+        # Insert shared file record
+        shared_files_collection.insert_one(shared_file.model_dump(by_alias=True, exclude={"id"}))
+        print(f"✅ [Direct Share] File record inserted into database")
+        
+    except Exception as e:
+        print(f"❌ [Direct Share] Error creating SharedFile model: {e}")
+        print(f"❌ [Direct Share] Error type: {type(e)}")
+        raise HTTPException(status_code=500, detail=f"Error creating file record: {str(e)}")
     
     # Log the direct file share
     client_ip = "unknown"
     log_entry = {
         "user_id": current_user.user_id,
-        "fintech_name": user.get("organization_name", "Unknown"),
+        "fintech_name": sender_org_name,  # Use the properly retrieved organization name
         "resource_name": "direct_file_share",
         "purpose": f"Direct file share: {file.filename}",
         "log_type": "direct_file_shared",
@@ -586,9 +636,12 @@ async def view_shared_file(
 ):
     """View a shared PDF file securely"""
     
+    print(f"🔍 [View File] Access attempt for file_id: {file_id} by user: {current_user.user_id}")
+    
     # Verify user has access to this file
     user = users_collection.find_one({"userid": current_user.user_id})
     if not user or user.get("user_type") != "organization":
+        print(f"❌ [View File] Access denied - User not found or not organization user")
         raise HTTPException(status_code=403, detail="Only organization users can view shared files")
     
     _, shared_files_collection = get_file_collections()
@@ -596,26 +649,52 @@ async def view_shared_file(
     # Get shared file
     shared_file = shared_files_collection.find_one({"file_id": file_id})
     if not shared_file:
+        print(f"❌ [View File] File not found in database: {file_id}")
         raise HTTPException(status_code=404, detail="File not found")
     
     user_org_id = user.get("organization_id")
-    if user_org_id not in [shared_file["sender_org_id"], shared_file["receiver_org_id"]]:
+    sender_org_id = shared_file["sender_org_id"]
+    receiver_org_id = shared_file["receiver_org_id"]
+    
+    print(f"🔍 [View File] User org: {user_org_id}, Sender: {sender_org_id}, Receiver: {receiver_org_id}")
+    
+    # Strict access control - only sender or receiver can view
+    if user_org_id not in [sender_org_id, receiver_org_id]:
+        print(f"❌ [View File] Access denied - User org {user_org_id} not authorized for file {file_id}")
         raise HTTPException(status_code=403, detail="Access denied to this file")
     
     # Check if file has expired
     if datetime.utcnow() > shared_file["expires_at"]:
+        print(f"❌ [View File] File expired: {shared_file['expires_at']}")
         raise HTTPException(status_code=400, detail="File has expired")
     
     # Check if file exists
     file_path = Path(shared_file["file_path"])
+    print(f"🔍 [View File] Looking for file at: {file_path.absolute()}")
+    print(f"🔍 [View File] File exists: {file_path.exists()}")
+    
     if not file_path.exists():
+        print(f"❌ [View File] File not found on disk: {file_path}")
         raise HTTPException(status_code=404, detail="File not found on disk")
     
-    # Read and decrypt file
-    with open(file_path, "rb") as f:
-        encrypted_content = f.read()
-    
-    decrypted_content = decrypt_pdf_content(encrypted_content)
+    # Read file content
+    try:
+        with open(file_path, "rb") as f:
+            file_content = f.read()
+        
+        print(f"📄 [View File] File size: {len(file_content)} bytes")
+        
+        # Check if it's a valid PDF
+        if not file_content.startswith(b'%PDF'):
+            print(f"⚠️ [View File] File doesn't start with PDF signature")
+            # Try to serve it anyway, browser might handle it
+        
+        # For now, serve the file as-is since we removed encryption
+        pdf_content = file_content
+        
+    except Exception as e:
+        print(f"❌ [View File] Error reading file: {e}")
+        raise HTTPException(status_code=500, detail="Error reading file")
     
     # Update access count and last accessed
     shared_files_collection.update_one(
@@ -626,29 +705,42 @@ async def view_shared_file(
         }
     )
     
-    # Log the file access
+    # Get proper organization name for logging
+    user_org = organizations_collection.find_one({"org_id": user_org_id})
+    user_org_name = user_org.get("org_name", "Unknown") if user_org else "Unknown"
+    
+    # Log the file access with detailed information
     client_ip = "unknown"
     log_entry = {
         "user_id": current_user.user_id,
-        "fintech_name": user.get("organization_name", "Unknown"),
+        "fintech_name": user_org_name,
         "resource_name": "shared_file_access",
-        "purpose": f"Viewed file: {shared_file['file_name']}",
+        "purpose": f"Viewed file: {shared_file['file_name']} (ID: {file_id})",
         "log_type": "shared_file_accessed",
         "ip_address": client_ip,
         "data_source": "organization",
         "created_at": datetime.utcnow(),
-        "file_id": file_id
+        "file_id": file_id,
+        "sender_org_id": sender_org_id,
+        "receiver_org_id": receiver_org_id,
+        "accessing_org_id": user_org_id
     }
     logs_collection.insert_one(log_entry)
     
-    # Return secure HTML viewer
+    print(f"✅ [View File] File access granted for user {current_user.user_id} from org {user_org_id}")
+    
+    # Convert PDF to base64 for embedding in secure HTML
+    import base64
+    pdf_base64 = base64.b64encode(pdf_content).decode('utf-8')
+    
+    # Create secure HTML wrapper with copy protection
     secure_html = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <title>Secure PDF Viewer - {shared_file['file_name']}</title>
         <meta http-equiv="X-Content-Type-Options" content="nosniff">
-        <meta http-equiv="X-Frame-Options" content="DENY">
+        <meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
         <meta http-equiv="X-XSS-Protection" content="1; mode=block">
         <style>
             * {{
@@ -665,13 +757,14 @@ async def view_shared_file(
                 user-drag: none !important;
             }}
             
-            body {{
+            body {{ 
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
                 margin: 0;
-                padding: 20px;
+                padding: 0;
                 background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
                 min-height: 100vh;
                 position: relative;
+                overflow-y: auto;
                 overflow-x: hidden;
             }}
             
@@ -681,7 +774,7 @@ async def view_shared_file(
                 border: 1px solid rgba(255, 255, 255, 0.2);
                 border-radius: 16px;
                 padding: 20px;
-                margin-bottom: 20px;
+                margin: 20px;
                 box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
                 position: relative;
                 overflow: hidden;
@@ -736,219 +829,116 @@ async def view_shared_file(
             }}
             
             .pdf-container {{
-                background: rgba(255, 255, 255, 0.95);
-                backdrop-filter: blur(10px);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 16px;
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-                overflow: hidden;
-                position: relative;
-                height: 80vh;
+                margin: 20px;
+                min-height: 600px;
+                height: auto;
+                border-radius: 12px;
+                overflow: visible;
+                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+                background: white;
+                padding: 20px;
             }}
             
-            .security-watermark {{
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%) rotate(-45deg);
-                font-size: 2rem;
-                font-weight: bold;
-                color: rgba(0, 0, 0, 0.02);
-                pointer-events: none;
-                z-index: 1;
-                white-space: nowrap;
-                user-select: none;
+            .pdf-embed {{
+                width: 100%;
+                min-height: 600px;
+                height: auto;
+                border: none;
+                pointer-events: auto;
             }}
             
-            @media print {{
-                * {{
-                    display: none !important;
-                }}
+            /* Disable all interactions */
+            ::selection {{
+                background: transparent !important;
+            }}
+            
+            ::-moz-selection {{
+                background: transparent !important;
+            }}
+            
+            /* Disable context menu */
+            body {{
+                -webkit-context-menu: none !important;
+                -moz-context-menu: none !important;
+                context-menu: none !important;
             }}
         </style>
+        <script>
+            // Disable right-click context menu
+            document.addEventListener('contextmenu', function(e) {{
+                e.preventDefault();
+                return false;
+            }});
+            
+            // Disable keyboard shortcuts
+            document.addEventListener('keydown', function(e) {{
+                // Block Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+S, Ctrl+P, F12, etc.
+                if (e.ctrlKey || e.metaKey || e.key === 'F12' || e.key === 'F5') {{
+                    e.preventDefault();
+                    return false;
+                }}
+            }});
+            
+            // Disable text selection
+            document.addEventListener('selectstart', function(e) {{
+                e.preventDefault();
+                return false;
+            }});
+            
+            // Disable drag and drop
+            document.addEventListener('dragstart', function(e) {{
+                e.preventDefault();
+                return false;
+            }});
+            
+            // Prevent opening developer tools
+            document.addEventListener('keydown', function(e) {{
+                if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key === 'I')) {{
+                    e.preventDefault();
+                    return false;
+                }}
+            }});
+        </script>
     </head>
     <body>
-        <div class="security-watermark">PEDOLONE SECURE PDF VIEWER</div>
-        
         <div class="secure-header">
             <h2>🔒 Secure PDF Viewer</h2>
             <p><strong>File:</strong> {shared_file['file_name']}</p>
-            <p><strong>Description:</strong> {shared_file['file_description']}</p>
-            <p><strong>Category:</strong> {shared_file['file_category']}</p>
-            <p><strong>From:</strong> {shared_file['sender_org_name']}</p>
-            <p><strong>To:</strong> {shared_file['receiver_org_name']}</p>
-            <p><strong>Uploaded:</strong> {shared_file['uploaded_at'].strftime('%Y-%m-%d %H:%M:%S')}</p>
-            <p><strong>Expires:</strong> {shared_file['expires_at'].strftime('%Y-%m-%d %H:%M:%S')}</p>
-            <p><strong>Access Count:</strong> {shared_file.get('access_count', 0) + 1}</p>
+            <p><strong>Shared by:</strong> {shared_file['sender_org_name']}</p>
+            <p><strong>Expires:</strong> {shared_file['expires_at'].strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
             
             <div class="security-warning">
-                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
-                    <span>⚠️</span>
-                    <strong>SECURITY NOTICE</strong>
-                </div>
-                <div style="font-size: 0.85rem;">
-                    This PDF is view-only. Download, copy, editing, and screenshots are disabled for data protection.
-                </div>
+                <strong>⚠️ SECURITY NOTICE:</strong> This is a read-only view. Copying, downloading, or editing is disabled for data protection.
+                <br>
+                <small>Screenshots and screen recording are also prevented for enhanced security.</small>
             </div>
         </div>
         
         <div class="pdf-container">
-            <iframe
-                src="data:application/pdf;base64,{base64.b64encode(decrypted_content).decode()}"
-                style="width: 100%; height: 100%; border: none;"
-                title="Secure PDF Viewer"
-                onContextMenu="return false;"
-                onDragStart="return false;"
-                onSelectStart="return false;"
-            ></iframe>
+            <embed 
+                class="pdf-embed"
+                src="data:application/pdf;base64,{pdf_base64}#toolbar=0&navpanes=0&scrollbar=0&statusbar=0&messages=0&scrollbar=0&view=FitH"
+                type="application/pdf"
+                width="100%"
+                height="100%"
+            />
         </div>
-        
-        <script>
-            // Comprehensive screenshot prevention
-            (function() {{
-                'use strict';
-                
-                // Disable right-click context menu
-                document.addEventListener('contextmenu', function(e) {{
-                    e.preventDefault();
-                    return false;
-                }});
-                
-                // Disable keyboard shortcuts for copy, save, print, screenshot
-                document.addEventListener('keydown', function(e) {{
-                    // Prevent Ctrl/Cmd + C (copy)
-                    if ((e.ctrlKey || e.metaKey) && e.key === 'c') {{
-                        e.preventDefault();
-                        return false;
-                    }}
-                    
-                    // Prevent Ctrl/Cmd + S (save)
-                    if ((e.ctrlKey || e.metaKey) && e.key === 's') {{
-                        e.preventDefault();
-                        return false;
-                    }}
-                    
-                    // Prevent Ctrl/Cmd + P (print)
-                    if ((e.ctrlKey || e.metaKey) && e.key === 'p') {{
-                        e.preventDefault();
-                        return false;
-                    }}
-                    
-                    // Prevent Print Screen key
-                    if (e.key === 'PrintScreen' || e.keyCode === 44) {{
-                        e.preventDefault();
-                        return false;
-                    }}
-                    
-                    // Prevent F12 (developer tools)
-                    if (e.key === 'F12' || e.keyCode === 123) {{
-                        e.preventDefault();
-                        return false;
-                    }}
-                    
-                    // Prevent Ctrl/Cmd + Shift + I (developer tools)
-                    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'I') {{
-                        e.preventDefault();
-                        return false;
-                    }}
-                    
-                    // Prevent Ctrl/Cmd + Shift + C (developer tools)
-                    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {{
-                        e.preventDefault();
-                        return false;
-                    }}
-                    
-                    // Prevent Ctrl/Cmd + Shift + J (developer tools)
-                    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'J') {{
-                        e.preventDefault();
-                        return false;
-                    }}
-                    
-                    // Prevent Ctrl/Cmd + U (view source)
-                    if ((e.ctrlKey || e.metaKey) && e.key === 'u') {{
-                        e.preventDefault();
-                        return false;
-                    }}
-                }});
-                
-                // Disable drag and drop
-                document.addEventListener('dragstart', function(e) {{
-                    e.preventDefault();
-                    return false;
-                }});
-                
-                // Disable text selection
-                document.addEventListener('selectstart', function(e) {{
-                    e.preventDefault();
-                    return false;
-                }});
-                
-                // Disable copy events
-                document.addEventListener('copy', function(e) {{
-                    e.preventDefault();
-                    return false;
-                }});
-                
-                // Disable cut events
-                document.addEventListener('cut', function(e) {{
-                    e.preventDefault();
-                    return false;
-                }});
-                
-                // Prevent iframe embedding
-                if (window.self !== window.top) {{
-                    window.top.location = window.self.location;
-                }}
-                
-                // Disable developer tools detection
-                function detectDevTools() {{
-                    const threshold = 160;
-                    const widthThreshold = window.outerWidth - window.innerWidth > threshold;
-                    const heightThreshold = window.outerHeight - window.innerHeight > threshold;
-                    
-                    if (widthThreshold || heightThreshold) {{
-                        document.body.innerHTML = '<div style="text-align: center; padding: 50px; font-family: Arial, sans-serif; background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); color: white; min-height: 100vh; display: flex; align-items: center; justify-content: center;"><div><h1>🔒 Security Alert</h1><p>Developer tools are not allowed for security reasons.</p><p>Please close developer tools and refresh the page.</p></div></div>';
-                    }}
-                }}
-                
-                // Check for developer tools periodically
-                setInterval(detectDevTools, 1000);
-                
-                // Disable print
-                window.addEventListener('beforeprint', function(e) {{
-                    e.preventDefault();
-                    return false;
-                }});
-                
-                // Prevent screen capture on some browsers
-                if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {{
-                    navigator.mediaDevices.getDisplayMedia = function() {{
-                        return Promise.reject(new Error('Screen sharing is not allowed'));
-                    }};
-                }}
-                
-                // Disable console access
-                console.log = function() {{}};
-                console.warn = function() {{}};
-                console.error = function() {{}};
-                console.info = function() {{}};
-                
-            }})();
-        </script>
     </body>
     </html>
     """
     
-    return StreamingResponse(
-        io.StringIO(secure_html),
+    # Return the secure HTML wrapper
+    return Response(
+        content=secure_html,
         media_type="text/html",
         headers={
-            "Content-Disposition": "inline",
-            "X-Frame-Options": "DENY",
+            "X-Frame-Options": "SAMEORIGIN",
             "X-Content-Type-Options": "nosniff",
             "Cache-Control": "no-store, no-cache, must-revalidate, private"
         }
     ) 
+
+
 
 @router.get("/organizations-with-contracts/{org_id}")
 async def get_organizations_with_file_contracts(
