@@ -36,19 +36,7 @@ const ConsentCard = ({ fintechName, dataTypes, purpose, validTill, status = 'act
         </div>
       </div>
 
-      <div className="flex space-x-2">
-        <button className="flex items-center px-3 py-2 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
-          <Eye size={14} className="mr-1" />
-          View Details
-        </button>
-        <button 
-          className="flex items-center px-3 py-2 text-sm bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50 opacity-50 cursor-not-allowed"
-          disabled
-        >
-          <X size={14} className="mr-1" />
-          Revoke
-        </button>
-      </div>
+
     </div>
   );
 };

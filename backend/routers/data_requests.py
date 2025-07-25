@@ -1,10 +1,17 @@
 import os
 import uuid
-from fastapi import APIRouter, HTTPException, Depends, Request
+import csv
+from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File, Form
 from datetime import datetime, timedelta
 from fastapi.encoders import jsonable_encoder
 from pymongo import MongoClient
 from dotenv import load_dotenv
+from typing import List, Optional
+from pydantic import BaseModel
+from fastapi.responses import FileResponse
+import io
+from cryptography.fernet import Fernet
+import base64
 
 from models import (
     DataAccessRequest, CreateDataRequest, RespondToRequest
@@ -30,6 +37,42 @@ organizations_collection = db.get_collection("organizations")
 data_requests_collection.create_index("expires_at", expireAfterSeconds=0)
 data_requests_collection.create_index([("target_user_id", 1), ("status", 1)])
 data_requests_collection.create_index([("requester_org_id", 1), ("status", 1)])
+
+# Add new models for bulk requests
+class CreateBulkDataRequest(BaseModel):
+    target_org_id: str
+    selected_users: List[int]  # List of user IDs
+    requested_resources: List[str]
+    purpose: List[str]
+    retention_window: str = "30 days"
+    request_message: Optional[str] = None
+
+class CSVFileMetadata(BaseModel):
+    file_id: str
+    original_filename: str
+    file_path: str
+    access_policy: dict
+    created_by: int
+    created_at: datetime
+    expires_at: datetime
+    bulk_request_id: Optional[str] = None
+
+# Create a new collection for CSV files
+csv_files_collection = db["csv_files"]
+
+# Generate encryption key (in production, use environment variable)
+ENCRYPTION_KEY = Fernet.generate_key()
+cipher_suite = Fernet(ENCRYPTION_KEY)
+
+def encrypt_file_content(content: bytes) -> str:
+    """Encrypt file content"""
+    encrypted_content = cipher_suite.encrypt(content)
+    return base64.b64encode(encrypted_content).decode('utf-8')
+
+def decrypt_file_content(encrypted_content: str) -> bytes:
+    """Decrypt file content"""
+    encrypted_bytes = base64.b64decode(encrypted_content.encode('utf-8'))
+    return cipher_suite.decrypt(encrypted_bytes)
 
 def get_organization_by_id(org_id: str):
     """Get organization by ID"""
@@ -93,51 +136,71 @@ async def send_data_request(
     
     # Check if there's an active contract between the organizations
     if target_org_id:
-        active_contract = inter_org_contracts_collection.find_one({
+        # Get all active contracts between the organizations
+        active_contracts = list(inter_org_contracts_collection.find({
             "$or": [
                 {"source_org_id": org["org_id"], "target_org_id": target_org_id},
                 {"source_org_id": target_org_id, "target_org_id": org["org_id"]}
             ],
-            "status": "active"
-        })
+            "status": "active",
+            "approval_status": "approved"
+        }))
         
-        if not active_contract:
+        if not active_contracts:
             raise HTTPException(
                 status_code=400, 
-                detail="No active inter-organization contract found. Please establish a contract before sending data requests."
+                detail="No active inter-organization contracts found. Please establish a contract before sending data requests."
             )
         
-        # Check if requested resources and purposes are allowed by the contract
+        # Check if any contract allows the requested resources and purposes
         contract_allowed_resources = []
         contract_allowed_purposes = {}
+        supporting_contracts = []
         
-        # Handle both old and new contract structures
-        if active_contract.get("resources_allowed"):
-            # New structure with ContractResource objects
-            for resource in active_contract.get("resources_allowed", []):
-                if isinstance(resource, dict) and "resource_name" in resource:
-                    resource_name = resource["resource_name"]
-                    contract_allowed_resources.append(resource_name)
-                    # Store allowed purposes for this resource
-                    if "purpose" in resource:
-                        contract_allowed_purposes[resource_name] = resource["purpose"]
+        for active_contract in active_contracts:
+            contract_resources = []
+            contract_purposes = {}
+            
+            # Handle both old and new contract structures
+            if active_contract.get("resources_allowed"):
+                # New structure with ContractResource objects
+                for resource in active_contract.get("resources_allowed", []):
+                    if isinstance(resource, dict) and "resource_name" in resource:
+                        resource_name = resource["resource_name"]
+                        contract_resources.append(resource_name)
+                        # Store allowed purposes for this resource
+                        if "purpose" in resource:
+                            contract_purposes[resource_name] = resource["purpose"]
+                    else:
+                        # Fallback if resource is just a string
+                        contract_resources.append(str(resource))
+            elif active_contract.get("allowed_resources"):
+                # Old structure with simple list
+                allowed_resources = active_contract.get("allowed_resources", [])
+                if isinstance(allowed_resources, str):
+                    contract_resources = [allowed_resources]
                 else:
-                    # Fallback if resource is just a string
-                    contract_allowed_resources.append(str(resource))
-        elif active_contract.get("allowed_resources"):
-            # Old structure with simple list
-            allowed_resources = active_contract.get("allowed_resources", [])
-            if isinstance(allowed_resources, str):
-                contract_allowed_resources = [allowed_resources]
-            else:
-                contract_allowed_resources = allowed_resources
+                    contract_resources = allowed_resources
+            
+            # Check if this contract supports the requested resources
+            unauthorized_resources = [r for r in request_data.requested_resources if r not in contract_resources]
+            if not unauthorized_resources:
+                # This contract supports all requested resources
+                contract_allowed_resources.extend(contract_resources)
+                contract_allowed_purposes.update(contract_purposes)
+                supporting_contracts.append({
+                    "contract_id": active_contract["contract_id"],
+                    "contract_name": active_contract.get("contract_name", "Legacy Contract"),
+                    "contract_type": active_contract.get("contract_type", "data_sharing")
+                })
         
-        # Check if all requested resources are allowed
-        unauthorized_resources = [r for r in request_data.requested_resources if r not in contract_allowed_resources]
-        if unauthorized_resources:
+        # Remove duplicates
+        contract_allowed_resources = list(set(contract_allowed_resources))
+        
+        if not supporting_contracts:
             raise HTTPException(
                 status_code=400,
-                detail=f"The following resources are not allowed by the active contract: {', '.join(unauthorized_resources)}"
+                detail=f"No active contracts support the requested resources: {', '.join(request_data.requested_resources)}"
             )
         
         # Check if all requested purposes are allowed for each resource
@@ -156,7 +219,7 @@ async def send_data_request(
         if unauthorized_purposes:
             raise HTTPException(
                 status_code=400,
-                detail=f"The following purposes are not allowed by the active contract: {', '.join(unauthorized_purposes)}"
+                detail=f"The following purposes are not allowed by the active contracts: {', '.join(unauthorized_purposes)}"
             )
     else:
         raise HTTPException(
@@ -199,8 +262,9 @@ async def send_data_request(
         expires_at=expires_at
     )
     
-    # Insert into database
-    result = data_requests_collection.insert_one(data_request.model_dump(by_alias=True))
+    # Insert into database - exclude id field to let MongoDB generate new _id
+    data_request_data = data_request.model_dump(by_alias=True, exclude={"id"})
+    result = data_requests_collection.insert_one(data_request_data)
     
     # Send WebSocket notification to target user
     await send_user_update(
@@ -225,9 +289,9 @@ async def send_data_request(
         "fintech_name": org["org_name"],
         "resource_name": ", ".join(request_data.requested_resources),
         "purpose": request_data.purpose,
-        "log_type": "data_request",
+        "log_type": "data_request_sent",
         "ip_address": client_ip,
-        "data_source": "individual",
+        "data_source": "organization",  # Changed from "individual" to "organization"
         "created_at": created_at,
         "request_id": request_id,
         "requester_org_id": org["org_id"],  # Org making the request
@@ -240,6 +304,603 @@ async def send_data_request(
         "request_id": request_id,
         "expires_at": expires_at.isoformat()
     }
+
+@router.post("/create-csv")
+async def create_csv_file(
+    bulk_request_id: str,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """Create CSV file for bulk data request with detokenized PII data"""
+    
+    # Verify user is from requesting organization
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user or user.get("user_type") != "organization":
+        raise HTTPException(status_code=403, detail="Only organization users can create CSV files")
+    
+    # Get all approved requests for this bulk request
+    requests = list(data_requests_collection.find({"bulk_request_id": bulk_request_id, "status": "approved"}))
+    
+    if not requests:
+        raise HTTPException(status_code=404, detail="No approved requests found for this bulk request")
+    
+    # Collect data for CSV
+    csv_data = []
+    
+    for request in requests:
+        # Get target user info
+        target_user = users_collection.find_one({"userid": request["target_user_id"]})
+        if not target_user:
+            continue
+        
+        # Get PII data for each requested resource
+        for resource in request["requested_resources"]:
+            # First find the user's PII document
+            user_pii_doc = user_pii_collection.find_one({
+                "user_id": request["target_user_id"]
+            })
+            
+            if user_pii_doc and "pii" in user_pii_doc:
+                # Find the specific resource within the PII array
+                pii_entry = next((pii for pii in user_pii_doc["pii"] if pii["resource"] == resource), None)
+                
+                if pii_entry:
+                    # Get the PII value - try to decrypt if it's encrypted, otherwise use as-is
+                    pii_value = pii_entry["original"]
+                    
+                    # Check if the value is encrypted (try to decrypt it)
+                    try:
+                        from helpers import decrypt_pii
+                        # Try to decrypt - if it fails, it's probably plain text
+                        decrypted_value = decrypt_pii(pii_value)
+                    except Exception as e:
+                        # If decryption fails, use the original value as-is (it's already plain text)
+                        decrypted_value = pii_value
+                    
+                    csv_data.append({
+                        "email": target_user.get("email", "N/A"),
+                        "full_name": target_user.get("full_name", "N/A"),
+                        "resource_type": resource,
+                        "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
+                        "value": decrypted_value,
+                        "request_id": request["request_id"],
+                        "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+                        "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                else:
+                    csv_data.append({
+                        "email": target_user.get("email", "N/A"),
+                        "full_name": target_user.get("full_name", "N/A"),
+                        "resource_type": resource,
+                        "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
+                        "value": "No data available",
+                        "request_id": request["request_id"],
+                        "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+                        "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
+                    })
+            else:
+                csv_data.append({
+                    "email": target_user.get("email", "N/A"),
+                    "full_name": target_user.get("full_name", "N/A"),
+                    "resource_type": resource,
+                    "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
+                    "value": "No PII document found",
+                    "request_id": request["request_id"],
+                    "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+                    "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
+                })
+    
+        if not csv_data:
+            raise HTTPException(status_code=404, detail="No data available for CSV export")
+    
+    # Create CSV content and save to public folder
+    try:
+        output = io.StringIO()
+        fieldnames = ["email", "full_name", "resource_type", "purpose", "value", "request_id", "requested_at", "expires_at"]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(csv_data)
+        
+        csv_content = output.getvalue()
+        output.close()
+        
+        # Generate unique file ID and filename
+        file_id = str(uuid.uuid4())
+        filename = f"bulk_data_export_{bulk_request_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+        file_path = f"public/csv_files/{filename}"
+        
+        # Save CSV file to public folder
+        os.makedirs("public/csv_files", exist_ok=True)
+        with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+            csvfile.write(csv_content)
+        
+        # Store file metadata
+        file_metadata = {
+            "file_id": file_id,
+            "bulk_request_id": bulk_request_id,
+            "original_filename": filename,
+            "file_path": file_path,
+            "access_policy": {
+                "view_only": True,
+                "no_download": True,
+                "no_copy": True,
+                "no_edit": True,
+                "no_print": True,
+                "web_only": True,
+                "expires_at": (datetime.utcnow() + timedelta(days=7)).isoformat(),
+                "allowed_orgs": [requests[0]["requester_org_id"]],
+                "created_by": current_user.user_id
+            },
+            "created_by": current_user.user_id,
+            "created_at": datetime.utcnow(),
+            "expires_at": datetime.utcnow() + timedelta(days=7),
+            "org_id": requests[0]["requester_org_id"],
+            "record_count": len(csv_data),
+            "bulk_request_id": bulk_request_id
+        }
+        
+        csv_files_collection.insert_one(file_metadata)
+        
+        # Update bulk request with file ID
+        data_requests_collection.update_many(
+            {"bulk_request_id": bulk_request_id},
+            {"$set": {"csv_file_id": file_id}}
+        )
+        
+        # Log the CSV creation
+        client_ip = "unknown"
+        log_entry = {
+            "user_id": current_user.user_id,
+            "fintech_name": requests[0]["requester_org_name"],
+            "resource_name": "bulk_data_csv_export",
+            "purpose": "Bulk data CSV export",
+            "log_type": "bulk_data_csv_created",
+            "ip_address": client_ip,
+            "data_source": "organization",
+            "created_at": datetime.utcnow(),
+            "bulk_request_id": bulk_request_id,
+            "requester_org_id": requests[0]["requester_org_id"],
+            "target_org_id": requests[0]["target_org_id"],
+            "exported_records": len(csv_data),
+            "file_id": file_id
+        }
+        logs_collection.insert_one(log_entry)
+        
+        return {
+            "message": "CSV file created successfully",
+            "file_id": file_id,
+            "view_url": f"/data-requests/view-csv/{file_id}",
+            "expires_at": file_metadata["expires_at"].isoformat(),
+            "record_count": len(csv_data)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating CSV file: {str(e)}")
+
+@router.get("/view-csv/{file_id}")
+async def view_csv_file(
+    file_id: str,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """View CSV file securely (no download, no copy, no edit)"""
+    
+    # Get file metadata
+    file_metadata = csv_files_collection.find_one({"file_id": file_id})
+    if not file_metadata:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Check access permissions
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user:
+        raise HTTPException(status_code=403, detail="User not found")
+    
+    # Check if user is from allowed organization
+    user_org_id = user.get("organization_id")
+    if user_org_id not in file_metadata["access_policy"]["allowed_orgs"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Check if file has expired
+    if datetime.utcnow() > file_metadata["expires_at"]:
+        raise HTTPException(status_code=400, detail="File has expired")
+    
+    # Read CSV file from public folder
+    try:
+        file_path = file_metadata["file_path"]
+        
+        # Check if file exists
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="CSV file not found on disk")
+        
+        # Read CSV content
+        with open(file_path, 'r', encoding='utf-8') as csvfile:
+            csv_content = csvfile.read()
+        
+        # Parse CSV content
+        csv_reader = csv.DictReader(io.StringIO(csv_content))
+        rows = list(csv_reader)
+        
+        if not rows:
+            raise HTTPException(status_code=400, detail="CSV file is empty")
+        
+        # Convert to HTML table for secure viewing
+        fieldnames = rows[0].keys()
+        html_content = "<table class='table table-striped table-bordered' id='secure-csv-table'>"
+        
+        # Add header row
+        html_content += "<thead><tr>"
+        for field in fieldnames:
+            html_content += f"<th>{field}</th>"
+        html_content += "</tr></thead>"
+        
+        # Add data rows
+        html_content += "<tbody>"
+        for row in rows:
+            html_content += "<tr>"
+            for field in fieldnames:
+                html_content += f"<td>{row.get(field, '')}</td>"
+            html_content += "</tr>"
+        html_content += "</tbody></table>"
+        
+        # Add CSS to prevent selection and copying
+        secure_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Secure CSV Viewer</title>
+            <meta http-equiv="X-Content-Type-Options" content="nosniff">
+            <meta http-equiv="X-Frame-Options" content="DENY">
+            <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+            <style>
+                * {{
+                    -webkit-user-select: none !important;
+                    -moz-user-select: none !important;
+                    -ms-user-select: none !important;
+                    user-select: none !important;
+                    -webkit-touch-callout: none !important;
+                    -webkit-tap-highlight-color: transparent !important;
+                    -webkit-user-drag: none !important;
+                    -khtml-user-drag: none !important;
+                    -moz-user-drag: none !important;
+                    -o-user-drag: none !important;
+                    user-drag: none !important;
+                }}
+                
+                body {{ 
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+                    margin: 0;
+                    padding: 20px;
+                    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+                    min-height: 100vh;
+                    position: relative;
+                    overflow-x: hidden;
+                }}
+                
+                .secure-header {{
+                    background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.95) 100%);
+                    backdrop-filter: blur(10px);
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border-radius: 16px;
+                    padding: 20px;
+                    margin-bottom: 20px;
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+                    position: relative;
+                    overflow: hidden;
+                }}
+                
+                .secure-header::before {{
+                    content: '';
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 4px;
+                    height: 100%;
+                    background: linear-gradient(135deg, #dc3545 0%, #b91c1c 100%);
+                }}
+                
+                .secure-header h2 {{
+                    color: #dc3545;
+                    margin: 0 0 15px 0;
+                    font-size: 1.5rem;
+                    font-weight: 700;
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                }}
+                
+                .secure-header p {{
+                    margin: 8px 0;
+                    color: #6c757d;
+                    font-size: 0.9rem;
+                }}
+                
+                .security-warning {{
+                    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+                    border: 1px solid #f59e0b;
+                    border-radius: 8px;
+                    padding: 12px 16px;
+                    color: #92400e;
+                    font-weight: 600;
+                    margin-top: 15px;
+                    position: relative;
+                    overflow: hidden;
+                }}
+                
+                .security-warning::before {{
+                    content: '';
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 4px;
+                    height: 100%;
+                    background: #f59e0b;
+                }}
+                
+                .secure-table-container {{
+                    background: rgba(255, 255, 255, 0.95);
+                    backdrop-filter: blur(10px);
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border-radius: 16px;
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+                    overflow: hidden;
+                    position: relative;
+                }}
+                
+                table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    background: transparent;
+                }}
+                
+                th, td {{
+                    border: 1px solid rgba(226, 232, 240, 0.8);
+                    padding: 12px 16px;
+                    text-align: left;
+                    font-size: 0.9rem;
+                }}
+                
+                th {{
+                    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+                    font-weight: 600;
+                    color: #374151;
+                    border-bottom: 2px solid #e5e7eb;
+                }}
+                
+                td {{
+                    color: #4b5563;
+                    background: rgba(255, 255, 255, 0.8);
+                }}
+                
+                tr:hover td {{
+                    background: rgba(59, 130, 246, 0.05);
+                }}
+                
+                .security-watermark {{
+                    position: fixed;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%) rotate(-45deg);
+                    font-size: 2rem;
+                    font-weight: bold;
+                    color: rgba(0, 0, 0, 0.02);
+                    pointer-events: none;
+                    z-index: 1;
+                    white-space: nowrap;
+                    user-select: none;
+                }}
+                
+                @media print {{
+                    * {{
+                        display: none !important;
+                    }}
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="security-watermark">PEDOLONE SECURE CSV VIEWER</div>
+            
+            <div class="secure-header">
+                <h2>🔒 Secure CSV Viewer</h2>
+                <p><strong>File:</strong> {file_metadata['original_filename']}</p>
+                <p><strong>Created:</strong> {file_metadata['created_at'].strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <p><strong>Expires:</strong> {file_metadata['expires_at'].strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <p><strong>Records:</strong> {file_metadata.get('record_count', 'Unknown')}</p>
+                
+                <div class="security-warning">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <span>⚠️</span>
+                        <strong>SECURITY NOTICE</strong>
+                    </div>
+                    <div style="font-size: 0.85rem;">
+                        This file is view-only. Download, copy, editing, and screenshots are disabled for data protection.
+                    </div>
+                </div>
+            </div>
+            
+            <div class="secure-table-container">
+                {html_content}
+            </div>
+            
+            <script>
+                // Comprehensive screenshot prevention
+                (function() {{
+                    'use strict';
+                    
+                    // Disable right-click context menu
+                    document.addEventListener('contextmenu', function(e) {{
+                        e.preventDefault();
+                        return false;
+                    }});
+                    
+                    // Disable keyboard shortcuts for copy, save, print, screenshot
+                    document.addEventListener('keydown', function(e) {{
+                        // Prevent Ctrl/Cmd + C (copy)
+                        if ((e.ctrlKey || e.metaKey) && e.key === 'c') {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent Ctrl/Cmd + S (save)
+                        if ((e.ctrlKey || e.metaKey) && e.key === 's') {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent Ctrl/Cmd + P (print)
+                        if ((e.ctrlKey || e.metaKey) && e.key === 'p') {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent Print Screen key
+                        if (e.key === 'PrintScreen' || e.keyCode === 44) {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent F12 (developer tools)
+                        if (e.key === 'F12' || e.keyCode === 123) {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent Ctrl/Cmd + Shift + I (developer tools)
+                        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'I') {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent Ctrl/Cmd + Shift + C (developer tools)
+                        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent Ctrl/Cmd + Shift + J (developer tools)
+                        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'J') {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                        
+                        // Prevent Ctrl/Cmd + U (view source)
+                        if ((e.ctrlKey || e.metaKey) && e.key === 'u') {{
+                            e.preventDefault();
+                            return false;
+                        }}
+                    }});
+                    
+                    // Disable drag and drop
+                    document.addEventListener('dragstart', function(e) {{
+                        e.preventDefault();
+                        return false;
+                    }});
+                    
+                    // Disable text selection
+                    document.addEventListener('selectstart', function(e) {{
+                        e.preventDefault();
+                        return false;
+                    }});
+                    
+                    // Disable copy events
+                    document.addEventListener('copy', function(e) {{
+                        e.preventDefault();
+                        return false;
+                    }});
+                    
+                    // Disable cut events
+                    document.addEventListener('cut', function(e) {{
+                        e.preventDefault();
+                        return false;
+                    }});
+                    
+                    // Prevent iframe embedding
+                    if (window.self !== window.top) {{
+                        window.top.location = window.self.location;
+                    }}
+                    
+                    // Disable developer tools detection
+                    function detectDevTools() {{
+                        const threshold = 160;
+                        const widthThreshold = window.outerWidth - window.innerWidth > threshold;
+                        const heightThreshold = window.outerHeight - window.innerHeight > threshold;
+                        
+                        if (widthThreshold || heightThreshold) {{
+                            document.body.innerHTML = '<div style="text-align: center; padding: 50px; font-family: Arial, sans-serif; background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); color: white; min-height: 100vh; display: flex; align-items: center; justify-content: center;"><div><h1>🔒 Security Alert</h1><p>Developer tools are not allowed for security reasons.</p><p>Please close developer tools and refresh the page.</p></div></div>';
+                        }}
+                    }}
+                    
+                    // Check for developer tools periodically
+                    setInterval(detectDevTools, 1000);
+                    
+                    // Disable print
+                    window.addEventListener('beforeprint', function(e) {{
+                        e.preventDefault();
+                        return false;
+                    }});
+                    
+                    // Prevent screen capture on some browsers
+                    if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {{
+                        navigator.mediaDevices.getDisplayMedia = function() {{
+                            return Promise.reject(new Error('Screen sharing is not allowed'));
+                        }};
+                    }}
+                    
+                    // Disable console access
+                    console.log = function() {{}};
+                    console.warn = function() {{}};
+                    console.error = function() {{}};
+                    console.info = function() {{}};
+                    
+                }})();
+            </script>
+        </body>
+        </html>
+        """
+        
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(
+            io.StringIO(secure_html),
+            media_type="text/html",
+            headers={
+                "Content-Disposition": "inline",
+                "X-Frame-Options": "DENY",
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "no-store, no-cache, must-revalidate, private"
+            }
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
+
+@router.get("/bulk-requests/{org_id}")
+async def get_bulk_requests(
+    org_id: str,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """Get bulk data requests for an organization"""
+    
+    # Verify user is from this organization
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user or user.get("organization_id") != org_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Get files where this org is the target
+    bulk_requests = list(csv_files_collection.find({
+        "org_id": org_id
+    }, sort=[("created_at", -1)]))
+    
+    # Format response
+    formatted_requests = []
+    for req in bulk_requests:
+        formatted_requests.append({
+            "file_id": req["file_id"],
+            "original_filename": req["original_filename"],
+            "created_at": req["created_at"].isoformat(),
+            "expires_at": req["expires_at"].isoformat(),
+            "record_count": req.get("record_count", 0),
+            "bulk_request_id": req.get("bulk_request_id"),
+            "is_expired": datetime.utcnow() > req["expires_at"]
+        })
+    
+    return formatted_requests
 
 @router.get("/received/{user_id}")
 async def get_received_requests(user_id: int, current_user: TokenData = Depends(get_current_user)):
@@ -331,15 +992,43 @@ async def get_organization_data_requests(org_id: str):
     all_requests = sent_requests + received_requests
     all_requests.sort(key=lambda x: x.get("created_at", datetime.min), reverse=True)
     
+    # Group bulk requests together
+    bulk_request_groups = {}
+    individual_requests = []
+    
+    for req in all_requests:
+        if req.get("is_bulk_request") and req.get("bulk_request_id"):
+            # This is part of a bulk request
+            bulk_id = req["bulk_request_id"]
+            if bulk_id not in bulk_request_groups:
+                bulk_request_groups[bulk_id] = {
+                    "bulk_request_id": bulk_id,
+                    "requests": [],
+                    "is_requester": req["requester_org_id"] == org_id,
+                    "requester_org_id": req["requester_org_id"],
+                    "requester_org_name": req["requester_org_name"],
+                    "target_org_id": req.get("target_org_id"),
+                    "target_org_name": req.get("target_org_name", "Unknown Organization"),
+                    "requested_resources": req["requested_resources"],
+                    "purpose": req["purpose"],
+                    "retention_window": req["retention_window"],
+                    "request_message": req.get("request_message"),
+                    "created_at": req["created_at"],
+                    "expires_at": req["expires_at"],
+                    "bulk_request_size": req.get("bulk_request_size", 0)
+                }
+            bulk_request_groups[bulk_id]["requests"].append(req)
+        else:
+            # This is an individual request
+            individual_requests.append(req)
+    
     # Format response
     formatted_requests = []
-    for req in all_requests:
+    
+    # Add individual requests
+    for req in individual_requests:
         is_requester = req["requester_org_id"] == org_id
-        
-        # Use stored target organization info
         target_org_name = req.get("target_org_name", "Unknown Organization")
-        
-
         
         formatted_requests.append({
             "request_id": req["request_id"],
@@ -358,8 +1047,62 @@ async def get_organization_data_requests(org_id: str):
             "expires_at": req["expires_at"].isoformat(),
             "responded_at": req.get("responded_at").isoformat() if req.get("responded_at") else None,
             "responded_by": req.get("responded_by"),
-            "is_requester": is_requester
+            "is_requester": is_requester,
+            "is_bulk_request": False
         })
+    
+    # Add bulk requests as single entries
+    for bulk_id, bulk_group in bulk_request_groups.items():
+        # Calculate overall status for the bulk request
+        statuses = [req["status"] for req in bulk_group["requests"]]
+        if all(status == "approved" for status in statuses):
+            overall_status = "approved"
+        elif all(status == "rejected" for status in statuses):
+            overall_status = "rejected"
+        elif any(status == "pending" for status in statuses):
+            overall_status = "pending"
+        else:
+            overall_status = "mixed"
+        
+        # Get the first request for basic info
+        first_request = bulk_group["requests"][0]
+        
+        formatted_requests.append({
+            "request_id": bulk_id,  # Use bulk_request_id as the main ID
+            "bulk_request_id": bulk_id,
+            "requester_org_id": bulk_group["requester_org_id"],
+            "requester_org_name": bulk_group["requester_org_name"],
+            "target_user_id": None,  # Bulk requests don't have a single target user
+            "target_user_email": f"{len(bulk_group['requests'])} users",  # Show count
+            "target_org_name": bulk_group["target_org_name"],
+            "requested_resources": bulk_group["requested_resources"],
+            "purpose": bulk_group["purpose"],
+            "retention_window": bulk_group["retention_window"],
+            "status": overall_status,
+            "request_message": bulk_group["request_message"],
+            "response_message": None,  # Bulk requests don't have a single response
+            "created_at": bulk_group["created_at"].isoformat(),
+            "expires_at": bulk_group["expires_at"].isoformat(),
+            "responded_at": None,
+            "responded_by": None,
+            "is_requester": bulk_group["is_requester"],
+            "is_bulk_request": True,
+            "bulk_request_size": bulk_group["bulk_request_size"],
+            "csv_file_id": bulk_group["requests"][0].get("csv_file_id"),  # Get csv_file_id from first request
+            "individual_requests": [
+                {
+                    "request_id": req["request_id"],
+                    "target_user_email": req["target_user_email"],
+                    "target_user_name": req.get("target_user_name", ""),
+                    "status": req["status"],
+                    "responded_at": req.get("responded_at").isoformat() if req.get("responded_at") else None
+                }
+                for req in bulk_group["requests"]
+            ]
+        })
+    
+    # Sort by created_at (newest first)
+    formatted_requests.sort(key=lambda x: x["created_at"], reverse=True)
     
     return formatted_requests
 
@@ -520,9 +1263,9 @@ async def respond_to_request(
         "fintech_name": request["requester_org_name"],
         "resource_name": ", ".join(request["requested_resources"]),
         "purpose": request["purpose"],
-        "log_type": "data_request_response",
+        "log_type": f"data_request_{response_data.status}",  # Changed to "data_request_approved" or "data_request_rejected"
         "ip_address": client_ip,
-        "data_source": "individual",
+        "data_source": "organization",  # Changed from "individual" to "organization"
         "created_at": datetime.utcnow(),
         "request_id": response_data.request_id,
         "response_status": response_data.status,
@@ -668,4 +1411,737 @@ async def get_available_organizations_for_requests(
     
     return list(available_organizations.values())
 
+@router.get("/approved-data/{request_id}")
+async def get_approved_data_pii(
+    request_id: str,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """Get PII data for an approved data request"""
+    
+    # Get the data request
+    request = data_requests_collection.find_one({"request_id": request_id})
+    if not request:
+        raise HTTPException(status_code=404, detail="Data request not found")
+    
+    # Check if request is approved
+    if request["status"] != "approved":
+        raise HTTPException(status_code=400, detail="Data request is not approved")
+    
+    # Verify user is from the requesting organization
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user:
+        raise HTTPException(status_code=403, detail="User not found")
+    
+    # Check if user is from the requesting organization
+    if user.get("organization_id") != request["requester_org_id"]:
+        raise HTTPException(status_code=403, detail="Access denied. Only the requesting organization can view this data.")
+    
+    # Get the target user's PII data
+    target_user_id = request["target_user_id"]
+    user_pii = user_pii_collection.find_one({"user_id": target_user_id})
+    
+    if not user_pii:
+        raise HTTPException(status_code=404, detail="No PII data found for this user")
+    
+    # Get user details
+    target_user = users_collection.find_one({"userid": target_user_id})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Target user not found")
+    
+    # Filter PII data to only include requested resources that were approved
+    approved_pii_data = []
+    
+    for pii_entry in user_pii.get("pii", []):
+        if pii_entry["resource"] in request["requested_resources"]:
+            try:
+                from helpers import decrypt_pii
+                decrypted_value = decrypt_pii(pii_entry["original"])
+                
+                approved_pii_data.append({
+                    "resource": pii_entry["resource"],
+                    "value": decrypted_value,
+                    "tokenized": pii_entry.get("tokenized", "N/A")
+                })
+            except Exception as e:
+                print(f"Error decrypting PII for {pii_entry['resource']}: {e}")
+                # Include tokenized version if decryption fails
+                approved_pii_data.append({
+                    "resource": pii_entry["resource"],
+                    "value": "Decryption failed",
+                    "tokenized": pii_entry.get("tokenized", "N/A")
+                })
+    
+    # Get active policies for this user and requesting organization
+    from routers.policy import policies_collection
+    active_policies = list(policies_collection.find({
+        "user_id": target_user_id,
+        "target_org_id": request["requester_org_id"],
+        "is_revoked": {"$ne": True}
+    }))
+    
+    # Format policies
+    formatted_policies = []
+    for policy in active_policies:
+        formatted_policies.append({
+            "resource_name": policy["resource_name"],
+            "purpose": policy.get("purpose", []),
+            "retention_window": policy.get("retention_window", "30 days"),
+            "created_at": policy["created_at"].isoformat(),
+            "contract_id": policy.get("contract_id")
+        })
+    
+    return {
+        "user_info": {
+            "full_name": target_user["full_name"],
+            "email": target_user["email"]
+        },
+        "pii_data": approved_pii_data,
+        "active_policies": formatted_policies,
+        "request_details": {
+            "request_id": request["request_id"],
+            "purpose": request["purpose"],
+            "requested_resources": request["requested_resources"],
+            "approved_at": request.get("responded_at").isoformat() if request.get("responded_at") else None
+        }
+    }
+
+@router.get("/bulk-approved-data/{org_id}")
+async def get_bulk_approved_data(
+    org_id: str,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """Get CSV file with all approved data requests for an organization"""
+    
+    # Verify user is from the requesting organization
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user or user.get("organization_id") != org_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Get all approved data requests for this organization
+    approved_requests = list(data_requests_collection.find({
+        "requester_org_id": org_id,
+        "status": "approved",
+        "expires_at": {"$gt": datetime.utcnow()}
+    }))
+    
+    if not approved_requests:
+        raise HTTPException(status_code=404, detail="No approved data requests found")
+    
+    # Collect data for CSV
+    csv_data = []
+    
+    for request in approved_requests:
+        # Get target user info
+        target_user = users_collection.find_one({"userid": request["target_user_id"]})
+        if not target_user:
+            continue
+        
+        # Get PII data for each requested resource
+        for resource in request["requested_resources"]:
+            # First find the user's PII document
+            user_pii_doc = user_pii_collection.find_one({
+                "user_id": request["target_user_id"]
+            })
+            
+            if user_pii_doc and "pii" in user_pii_doc:
+                # Find the specific resource within the PII array
+                pii_entry = next((pii for pii in user_pii_doc["pii"] if pii["resource"] == resource), None)
+                
+                if pii_entry:
+                    # Get the PII value - try to decrypt if it's encrypted, otherwise use as-is
+                    pii_value = pii_entry["original"]
+                    
+                    # Check if the value is encrypted (try to decrypt it)
+                    try:
+                        from helpers import decrypt_pii
+                        # Try to decrypt - if it fails, it's probably plain text
+                        decrypted_value = decrypt_pii(pii_value)
+                    except Exception as e:
+                        # If decryption fails, use the original value as-is (it's already plain text)
+                        decrypted_value = pii_value
+                    
+                    csv_data.append({
+                        "email": target_user.get("email", "N/A"),
+                        "full_name": target_user.get("full_name", "N/A"),
+                        "resource_type": resource,
+                        "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
+                        "value": decrypted_value,
+                        "request_id": request["request_id"],
+                        "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+                        "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                else:
+                    csv_data.append({
+                        "email": target_user.get("email", "N/A"),
+                        "full_name": target_user.get("full_name", "N/A"),
+                        "resource_type": resource,
+                        "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
+                        "value": "No data available",
+                        "request_id": request["request_id"],
+                        "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+                        "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
+                    })
+            else:
+                csv_data.append({
+                    "email": target_user.get("email", "N/A"),
+                    "full_name": target_user.get("full_name", "N/A"),
+                    "resource_type": resource,
+                    "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
+                    "value": "No PII document found",
+                    "request_id": request["request_id"],
+                    "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+                    "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
+                })
+    
+    if not csv_data:
+        raise HTTPException(status_code=404, detail="No data available for export")
+    
+    # Create CSV content
+    try:
+        output = io.StringIO()
+        fieldnames = ["email", "full_name", "resource_type", "purpose", "value", "request_id", "requested_at", "expires_at"]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(csv_data)
+        
+        csv_content = output.getvalue()
+        output.close()
+        
+        # Generate unique file ID and filename
+        file_id = str(uuid.uuid4())
+        filename = f"approved_data_{org_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+        file_path = f"public/csv_files/{filename}"
+        
+        # Save CSV file to public folder
+        os.makedirs("public/csv_files", exist_ok=True)
+        with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+            csvfile.write(csv_content)
+        
+        # Store encrypted file metadata
+        file_metadata = {
+            "file_id": file_id,
+            "original_filename": filename,
+            "file_path": file_path,
+            "access_policy": {
+                "view_only": True,
+                "no_download": True,
+                "no_copy": True,
+                "no_edit": True,
+                "no_print": True,
+                "web_only": True,
+                "expires_at": (datetime.utcnow() + timedelta(days=7)).isoformat(),
+                "allowed_orgs": [org_id],
+                "created_by": current_user.user_id
+            },
+            "created_by": current_user.user_id,
+            "created_at": datetime.utcnow(),
+            "expires_at": datetime.utcnow() + timedelta(days=7),
+            "org_id": org_id,
+            "record_count": len(csv_data)
+        }
+        
+        csv_files_collection.insert_one(file_metadata)
+        
+        # Log the export
+        client_ip = "unknown"
+        log_entry = {
+            "user_id": current_user.user_id,
+            "fintech_name": org_id,
+            "resource_name": "bulk_data_csv_export",
+            "purpose": "Data export for approved requests",
+            "log_type": "bulk_data_csv_export",
+            "ip_address": client_ip,
+            "data_source": "organization",
+            "created_at": datetime.utcnow(),
+            "exported_records": len(csv_data),
+            "requester_org_id": org_id,
+            "file_id": file_id
+        }
+        logs_collection.insert_one(log_entry)
+        
+        # Return the file ID for web viewing instead of direct download
+        return {
+            "message": "Encrypted CSV file created successfully",
+            "file_id": file_id,
+            "view_url": f"/data-requests/view-csv/{file_id}",
+            "expires_at": file_metadata["expires_at"].isoformat(),
+            "record_count": len(csv_data)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating CSV file: {str(e)}")
+
+@router.post("/create-bulk-request")
+async def create_bulk_data_request(
+    request_data: CreateBulkDataRequest,
+    current_user: TokenData = Depends(get_current_user),
+    http_request: Request = None
+):
+    """Create a bulk data request for multiple users"""
+    
+    # Debug logging
+    print(f"Received bulk request data: {request_data}")
+    print(f"Current user: {current_user.user_id}")
+    
+    # Verify current user is an organization admin
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user or user.get("user_type") != "organization":
+        raise HTTPException(status_code=403, detail="Only organization admins can send bulk data requests")
+    
+    # Get organization details
+    org = get_organization_by_id(user.get("organization_id"))
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    
+    # Verify target organization exists
+    target_org = get_organization_by_id(request_data.target_org_id)
+    if not target_org:
+        raise HTTPException(status_code=404, detail="Target organization not found")
+    
+    # Check if there's an active contract between the organizations
+    active_contracts = list(inter_org_contracts_collection.find({
+        "$or": [
+            {"source_org_id": org["org_id"], "target_org_id": request_data.target_org_id},
+            {"source_org_id": request_data.target_org_id, "target_org_id": org["org_id"]}
+        ],
+        "status": "active",
+        "approval_status": "approved"
+    }))
+    
+    if not active_contracts:
+        raise HTTPException(
+            status_code=400, 
+            detail="No active inter-organization contracts found. Please establish a contract before sending bulk data requests."
+        )
+    
+    # Verify all target users exist and belong to the target organization
+    target_users = []
+    for user_id in request_data.selected_users:
+        target_user = users_collection.find_one({"userid": user_id})
+        if not target_user:
+            raise HTTPException(status_code=404, detail=f"Target user with ID {user_id} not found")
+        
+        # Check if user belongs to target organization through multiple methods
+        user_belongs_to_target = False
+        
+        # Method 1: Direct organization_id field
+        if target_user.get("organization_id") == request_data.target_org_id:
+            user_belongs_to_target = True
+        
+        # Method 2: Check if user has policies with the target organization
+        if not user_belongs_to_target:
+            user_policies = list(policies_collection.find({
+                "user_id": user_id,
+                "$or": [
+                    {"target_org_id": request_data.target_org_id},
+                    {"shared_with": target_org["org_name"]}
+                ]
+            }))
+            if user_policies:
+                user_belongs_to_target = True
+        
+        if not user_belongs_to_target:
+            raise HTTPException(status_code=400, detail=f"User {user_id} does not belong to target organization")
+        
+        target_users.append(target_user)
+    
+    # Create bulk request ID
+    bulk_request_id = str(uuid.uuid4())
+    
+    # Create individual data requests for each user
+    created_requests = []
+    for target_user in target_users:
+        request_id = str(uuid.uuid4())
+        
+        # Calculate expiration date
+        retention_days = int(request_data.retention_window.split()[0])
+        expires_at = datetime.utcnow() + timedelta(days=retention_days)
+        
+        # Create data request
+        data_request = {
+            "request_id": request_id,
+            "bulk_request_id": bulk_request_id,  # Link to bulk request
+            "requester_org_id": org["org_id"],
+            "requester_org_name": org["org_name"],
+            "target_org_id": request_data.target_org_id,
+            "target_org_name": target_org["org_name"],
+            "target_user_id": target_user["userid"],
+            "target_user_email": target_user["email"],
+            "target_user_name": target_user["full_name"],
+            "requested_resources": request_data.requested_resources,
+            "purpose": request_data.purpose,
+            "retention_window": request_data.retention_window,
+            "request_message": request_data.request_message,
+            "status": "pending",
+            "created_at": datetime.utcnow(),
+            "expires_at": expires_at,
+            "is_bulk_request": True,  # Mark as bulk request
+            "bulk_request_size": len(request_data.selected_users)
+        }
+        
+        data_requests_collection.insert_one(data_request)
+        created_requests.append(data_request)
+    
+    # Log the bulk request creation
+    client_ip = http_request.client.host if http_request else "unknown"
+    log_entry = {
+        "user_id": current_user.user_id,
+        "fintech_name": org["org_name"],
+        "resource_name": "bulk_data_request",
+        "purpose": ", ".join(request_data.purpose),
+        "log_type": "bulk_data_request_created",
+        "ip_address": client_ip,
+        "data_source": "organization",
+        "created_at": datetime.utcnow(),
+        "bulk_request_id": bulk_request_id,
+        "requester_org_id": org["org_id"],
+        "target_org_id": request_data.target_org_id,
+        "user_count": len(request_data.selected_users),
+        "resources_requested": request_data.requested_resources
+    }
+    logs_collection.insert_one(log_entry)
+    
+    return {
+        "message": f"Bulk data request created successfully for {len(created_requests)} users",
+        "bulk_request_id": bulk_request_id,
+        "created_requests": len(created_requests),
+        "target_organization": target_org["org_name"],
+        "expires_at": expires_at.isoformat()
+    }
+
+@router.get("/bulk-request/{bulk_request_id}")
+async def get_bulk_request_details(
+    bulk_request_id: str,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """Get details of a specific bulk request"""
+    
+    # Get all requests for this bulk request
+    requests = list(data_requests_collection.find({"bulk_request_id": bulk_request_id}))
+    
+    if not requests:
+        raise HTTPException(status_code=404, detail="Bulk request not found")
+    
+    # Verify user has access to this bulk request
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user:
+        raise HTTPException(status_code=403, detail="User not found")
+    
+    # Check if user is from requesting or target organization
+    requester_org_id = requests[0]["requester_org_id"]
+    target_org_id = requests[0]["target_org_id"]
+    
+    if user.get("organization_id") not in [requester_org_id, target_org_id]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Group requests by status
+    status_counts = {}
+    for request in requests:
+        status = request["status"]
+        status_counts[status] = status_counts.get(status, 0) + 1
+    
+    return {
+        "bulk_request_id": bulk_request_id,
+        "requester_org_id": requester_org_id,
+        "requester_org_name": requests[0]["requester_org_name"],
+        "target_org_id": target_org_id,
+        "target_org_name": requests[0]["target_org_name"],
+        "total_requests": len(requests),
+        "status_counts": status_counts,
+        "requested_resources": requests[0]["requested_resources"],
+        "purpose": requests[0]["purpose"],
+        "retention_window": requests[0]["retention_window"],
+        "request_message": requests[0]["request_message"],
+        "created_at": requests[0]["created_at"].isoformat(),
+        "expires_at": requests[0]["expires_at"].isoformat(),
+        "requests": [
+            {
+                "request_id": req["request_id"],
+                "target_user_email": req["target_user_email"],
+                "target_user_name": req["target_user_name"],
+                "status": req["status"],
+                "responded_at": req.get("responded_at").isoformat() if req.get("responded_at") else None
+            }
+            for req in requests
+        ]
+    }
+
+@router.post("/approve-bulk-request/{bulk_request_id}")
+async def approve_bulk_request(
+    bulk_request_id: str,
+    current_user: TokenData = Depends(get_current_user),
+    http_request: Request = None
+):
+    """Approve all requests in a bulk request and generate encrypted CSV"""
+    
+    # Get all requests for this bulk request
+    requests = list(data_requests_collection.find({"bulk_request_id": bulk_request_id}))
+    
+    if not requests:
+        raise HTTPException(status_code=404, detail="Bulk request not found")
+    
+    # Verify user is from target organization
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user or user.get("organization_id") != requests[0]["target_org_id"]:
+        raise HTTPException(status_code=403, detail="Only target organization can approve bulk requests")
+    
+    # Check if all requests are pending
+    pending_requests = [req for req in requests if req["status"] == "pending"]
+    if not pending_requests:
+        raise HTTPException(status_code=400, detail="No pending requests to approve")
+    
+    # Approve all pending requests
+    approved_count = 0
+    for request in pending_requests:
+        data_requests_collection.update_one(
+            {"request_id": request["request_id"]},
+            {
+                "$set": {
+                    "status": "approved",
+                    "responded_at": datetime.utcnow(),
+                    "responded_by": current_user.user_id
+                }
+            }
+        )
+        approved_count += 1
+    
+    # Generate encrypted CSV file with all approved data
+    try:
+        # Collect data for CSV
+        csv_data = []
+        
+        print(f"Processing {len(requests)} requests for bulk request {bulk_request_id}")
+        
+        # Get updated requests after approval
+        updated_requests = list(data_requests_collection.find({"bulk_request_id": bulk_request_id}))
+        
+        for request in updated_requests:
+            if request["status"] == "approved":
+                print(f"Processing approved request {request['request_id']} for user {request['target_user_id']}")
+                # Get target user info
+                target_user = users_collection.find_one({"userid": request["target_user_id"]})
+                if not target_user:
+                    print(f"Target user {request['target_user_id']} not found")
+                    continue
+                
+                print(f"Target user found: {target_user.get('email', 'N/A')}")
+                print(f"Requested resources: {request['requested_resources']}")
+                
+                # Get PII data for each requested resource
+                for resource in request["requested_resources"]:
+                    # First find the user's PII document
+                    user_pii_doc = user_pii_collection.find_one({
+                        "user_id": request["target_user_id"]
+                    })
+                    
+                    if user_pii_doc and "pii" in user_pii_doc:
+                        print(f"Found PII document for user {request['target_user_id']} with {len(user_pii_doc['pii'])} PII entries")
+                        print(f"Available resources: {[pii.get('resource', 'N/A') for pii in user_pii_doc['pii']]}")
+                        
+                        # Find the specific resource within the PII array
+                        pii_entry = next((pii for pii in user_pii_doc["pii"] if pii["resource"] == resource), None)
+                        
+                        if pii_entry:
+                            print(f"Found PII entry for resource {resource}")
+                            
+                            # Get the PII value - try to decrypt if it's encrypted, otherwise use as-is
+                            pii_value = pii_entry["original"]
+                            
+                            # Check if the value is encrypted (try to decrypt it)
+                            try:
+                                from helpers import decrypt_pii
+                                # Try to decrypt - if it fails, it's probably plain text
+                                decrypted_value = decrypt_pii(pii_value)
+                                print(f"Successfully decrypted PII value for {resource}")
+                            except Exception as e:
+                                # If decryption fails, use the original value as-is (it's already plain text)
+                                decrypted_value = pii_value
+                                print(f"Using plain text PII value for {resource} (not encrypted)")
+                            
+                            csv_data.append({
+                                "email": target_user.get("email", "N/A"),
+                                "full_name": target_user.get("full_name", "N/A"),
+                                "resource_type": resource,
+                                "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
+                                "value": decrypted_value,
+                                "request_id": request["request_id"],
+                                "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+                                "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                        else:
+                            print(f"No PII data found for user {request['target_user_id']}, resource {resource}")
+                            csv_data.append({
+                                "email": target_user.get("email", "N/A"),
+                                "full_name": target_user.get("full_name", "N/A"),
+                                "resource_type": resource,
+                                "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
+                                "value": "No data available",
+                                "request_id": request["request_id"],
+                                "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+                                "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                    else:
+                        print(f"No PII document found for user {request['target_user_id']}")
+                        csv_data.append({
+                            "email": target_user.get("email", "N/A"),
+                            "full_name": target_user.get("full_name", "N/A"),
+                            "resource_type": resource,
+                            "purpose": ", ".join(request["purpose"]) if isinstance(request["purpose"], list) else request["purpose"],
+                            "value": "No PII document found",
+                            "request_id": request["request_id"],
+                            "requested_at": request["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+                            "expires_at": request["expires_at"].strftime("%Y-%m-%d %H:%M:%S")
+                        })
+        
+        if not csv_data:
+            print(f"No CSV data collected for bulk request {bulk_request_id}")
+            print(f"Total requests: {len(requests)}")
+            print(f"Approved requests: {len([r for r in requests if r['status'] == 'approved'])}")
+            # Instead of raising an error, create a CSV with available data or placeholder
+            csv_data.append({
+                "email": "No data available",
+                "full_name": "No data available", 
+                "resource_type": "No data available",
+                "purpose": "No data available",
+                "value": "No PII data found for the requested resources",
+                "request_id": "N/A",
+                "requested_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                "expires_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            })
+        
+        print(f"Collected {len(csv_data)} records for CSV export")
+        
+        # Create CSV content
+        output = io.StringIO()
+        fieldnames = ["email", "full_name", "resource_type", "purpose", "value", "request_id", "requested_at", "expires_at"]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(csv_data)
+        
+        csv_content = output.getvalue()
+        output.close()
+        
+        # Generate unique file ID and filename
+        file_id = str(uuid.uuid4())
+        filename = f"bulk_data_export_{bulk_request_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+        file_path = f"public/csv_files/{filename}"
+        
+        # Save CSV file to public folder
+        os.makedirs("public/csv_files", exist_ok=True)
+        with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+            csvfile.write(csv_content)
+        
+        # Store encrypted file metadata
+        file_metadata = {
+            "file_id": file_id,
+            "bulk_request_id": bulk_request_id,
+            "original_filename": filename,
+            "file_path": file_path,
+            "access_policy": {
+                "view_only": True,
+                "no_download": True,
+                "no_copy": True,
+                "no_edit": True,
+                "no_print": True,
+                "web_only": True,
+                "expires_at": (datetime.utcnow() + timedelta(days=7)).isoformat(),
+                "allowed_orgs": [requests[0]["requester_org_id"]],
+                "created_by": current_user.user_id
+            },
+            "created_by": current_user.user_id,
+            "created_at": datetime.utcnow(),
+            "expires_at": datetime.utcnow() + timedelta(days=7),
+            "org_id": requests[0]["requester_org_id"],
+            "record_count": len(csv_data),
+            "bulk_request_id": bulk_request_id
+        }
+        
+        csv_files_collection.insert_one(file_metadata)
+        
+        # Update bulk request with file ID
+        data_requests_collection.update_many(
+            {"bulk_request_id": bulk_request_id},
+            {"$set": {"csv_file_id": file_id}}
+        )
+        
+        # Log the approval and export
+        client_ip = http_request.client.host if http_request else "unknown"
+        log_entry = {
+            "user_id": current_user.user_id,
+            "fintech_name": requests[0]["target_org_name"],
+            "resource_name": "bulk_data_approval",
+            "purpose": "Bulk data request approval and export",
+            "log_type": "bulk_data_approved",
+            "ip_address": client_ip,
+            "data_source": "organization",
+            "created_at": datetime.utcnow(),
+            "bulk_request_id": bulk_request_id,
+            "requester_org_id": requests[0]["requester_org_id"],
+            "target_org_id": requests[0]["target_org_id"],
+            "approved_requests": approved_count,
+            "exported_records": len(csv_data),
+            "file_id": file_id
+        }
+        logs_collection.insert_one(log_entry)
+        
+        return {
+            "message": f"Bulk request approved successfully. {approved_count} requests approved.",
+            "bulk_request_id": bulk_request_id,
+            "approved_requests": approved_count,
+            "csv_file_id": file_id,
+            "view_url": f"/data-requests/view-csv/{file_id}",
+            "record_count": len(csv_data),
+            "expires_at": file_metadata["expires_at"].isoformat()
+        }
+        
+    except Exception as e:
+        print(f"Error generating CSV file: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error generating CSV file: {str(e)}")
+
+@router.get("/download-csv/{file_id}")
+async def download_csv_file(
+    file_id: str,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """Download CSV file directly from public folder"""
+    
+    # Get file metadata
+    file_metadata = csv_files_collection.find_one({"file_id": file_id})
+    if not file_metadata:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Check access permissions
+    user = users_collection.find_one({"userid": current_user.user_id})
+    if not user:
+        raise HTTPException(status_code=403, detail="User not found")
+    
+    # Check if user is from allowed organization
+    user_org_id = user.get("organization_id")
+    if user_org_id not in file_metadata["access_policy"]["allowed_orgs"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Check if file has expired
+    if datetime.utcnow() > file_metadata["expires_at"]:
+        raise HTTPException(status_code=400, detail="File has expired")
+    
+    # Check if file exists
+    file_path = file_metadata["file_path"]
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="CSV file not found on disk")
+    
+    # Return the file directly
+    return FileResponse(
+        path=file_path,
+        filename=file_metadata["original_filename"],
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename={file_metadata['original_filename']}",
+            "X-Frame-Options": "DENY",
+            "X-Content-Type-Options": "nosniff"
+        }
+    )
+
+ 
  

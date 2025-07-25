@@ -358,13 +358,22 @@ async def get_organization_data_categories(org_id: str):
     return categories
 
 @router.get("/org-dashboard/{org_id}/logs")
-def get_org_access_logs(org_id: str, limit: int = 10):
-    """Get recent access logs for an organization's PII by fintech_id, requester_org_id, or responder_org_id"""
+def get_org_access_logs(org_id: str, limit: int = 50):
+    """Get recent access logs for an organization's PII by fintech_id, requester_org_id, responder_org_id, or target_org_id"""
+    # Get organization details to find the org name
+    from helpers import get_organization_by_id
+    org = get_organization_by_id(org_id)
+    org_name = org["org_name"] if org else org_id
+    
     logs = list(logs_collection.find(
         {"$or": [
             {"fintech_id": org_id},
             {"requester_org_id": org_id},
-            {"responder_org_id": org_id}
+            {"responder_org_id": org_id},
+            {"target_org_id": org_id},
+            {"source_org_id": org_id},
+            {"organization_id": org_id},  # For login logs
+            {"fintech_name": org_name}  # Fallback for logs that use org name
         ]},
         sort=[("created_at", -1)],
         limit=limit
@@ -374,7 +383,7 @@ def get_org_access_logs(org_id: str, limit: int = 10):
         log["_id"] = str(log["_id"])
         log["created_at"] = log["created_at"].isoformat()
         # For frontend compatibility: always provide fintechName
-        log["fintechId"] = log.get("fintech_id") or log.get("requester_org_id") or log.get("responder_org_id")
+        log["fintechId"] = log.get("fintech_id") or log.get("requester_org_id") or log.get("responder_org_id") or log.get("target_org_id") or log.get("source_org_id") or log.get("organization_id")
     return jsonable_encoder(logs)
 
 @router.get("/org-dashboard/{org_id}/data_categories")
@@ -408,13 +417,27 @@ def get_org_dashboard_data_categories(org_id: str):
 @router.get("/org-dashboard/{org_id}/contract-logs")
 def get_org_contract_logs(org_id: str, limit: int = 20):
     """Get contract creation/response logs for an organization (by source or target org_id)"""
+    from routers.inter_org_contracts import inter_org_contracts_collection
+    
+    # First, get all contract IDs that are not deleted
+    # This ensures deleted contracts don't appear in the contract logs tab
+    active_contracts = list(inter_org_contracts_collection.find(
+        {"status": {"$ne": "deleted"}},
+        {"contract_id": 1}
+    ))
+    active_contract_ids = [contract["contract_id"] for contract in active_contracts]
+    
+    # Then get logs only for active contracts
     logs = list(logs_collection.find(
         {
             "$and": [
-                {"log_type": {"$in": ["contract_creation", "contract_response"]}},
+                {"log_type": {"$in": ["contract_creation", "contract_request_approved", "contract_request_rejected"]}},
                 {"$or": [
                     {"source_org_id": org_id},
-                    {"target_org_id": org_id}
+                    {"target_org_id": org_id},
+                    {"requester_org_id": org_id},
+                    {"responder_org_id": org_id},
+                    {"organization_id": org_id}
                 ]}
             ]
         },

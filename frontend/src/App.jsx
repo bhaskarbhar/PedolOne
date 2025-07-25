@@ -19,31 +19,22 @@ import Security from './pages/Security';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import Navbar from './components/navbar';
 import Footer from './components/footer';
-
 function App() {
   return (
     <AuthProvider>
       <div className="min-h-screen flex flex-col w-full">
-      <Navbar />
+        <Navbar />
         <main className="flex-grow w-full">
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/login/org" element={<OrgLogin />} />
-          <Route path="/login/user" element={<UserLogin />} />
-          <Route path="/signup/user" element={<UserSignup />} />
-          <Route path="/signup/org" element={<OrgSignup />} />
-          <Route path="/dashboard/user" element={<UserDashboard />} />
-          <Route path="/dashboard/org" element={<OrgDashboard />} />
-          <Route path="/verification-success" element={<VerificationSuccess />} />
-          <Route path="/features" element={<Features />} />
-          <Route path="/about" element={<About />} />
-          <Route path="/contact" element={<Contact />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/policy" element={<Policy />} />
-          <Route path="/terms" element={<TermsOfService />} />
-          <Route path="/security" element={<Security />} />
-          <Route path="/privacy" element={<PrivacyPolicy />} />
-        </Routes>
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/login/org" element={<OrgLogin />} />
+            <Route path="/login/user" element={<UserLogin />} />
+            <Route path="/signup/user" element={<UserSignup />} />
+            <Route path="/signup/org" element={<OrgSignup />} />
+            <Route path="/dashboard/user" element={<UserDashboard />} />
+            <Route path="/dashboard/org" element={<OrgDashboard />} />
+            <Route path="/verification-success" element={<VerificationSuccess />} />
+          </Routes>
         </main>
         <Footer />
       </div>

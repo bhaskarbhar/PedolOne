@@ -6,9 +6,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
     <meta name="description" content="PedolOne - Privacy-first data vaulting, controlled sharing, and airtight compliance for fintech." />
     <title>PedolOne - Secure. Share. Comply.</title>
+    
+    <!-- Security Headers -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+    <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
+    <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=()">
+    
+    <!-- Security restrictions removed - Developer tools are now accessible -->
+    <script>
+      console.log('Security restrictions removed from index.html - Developer tools are now accessible');
+    </script>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-  </body>
+  </body>
 </html>

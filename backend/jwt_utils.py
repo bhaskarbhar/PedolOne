@@ -31,21 +31,32 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 def verify_token(token: str, credentials_exception):
     """Verify JWT token and extract user data"""
     try:
+        print(f"DEBUG: Verifying token: {token[:20]}...")
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        print(f"DEBUG: Token payload: {payload}")
         email: str = payload.get("sub")
         user_id: int = payload.get("user_id")
         
+        print(f"DEBUG: Extracted email: {email}, user_id: {user_id}")
+        
         if email is None or user_id is None:
+            print(f"DEBUG: Missing email or user_id in token")
             raise credentials_exception
             
         token_data = TokenData(email=email, user_id=user_id)
+        print(f"DEBUG: Created TokenData: {token_data}")
         return token_data
         
-    except jwt.PyJWTError:
+    except jwt.PyJWTError as e:
+        print(f"DEBUG: JWT decode error: {e}")
         raise credentials_exception
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Dependency to get current user from JWT token"""
+    print(f"DEBUG: get_current_user called")
+    print(f"DEBUG: credentials: {credentials}")
+    print(f"DEBUG: credentials.credentials: {credentials.credentials[:20] if credentials.credentials else 'None'}...")
+    
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
