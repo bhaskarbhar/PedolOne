@@ -1,6 +1,6 @@
 import os
 import json
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta
 from fastapi.encoders import jsonable_encoder
 from pymongo import MongoClient

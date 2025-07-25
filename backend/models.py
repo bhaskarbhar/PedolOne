@@ -202,6 +202,20 @@ class RespondToRequest(BaseModel):
     status: str  # "approved" or "rejected"
     response_message: Optional[str] = None
 
+# --- Profile Update Models ---
+class ProfileUpdateRequest(BaseModel):
+    email: Optional[EmailStr] = None
+    username: Optional[str] = Field(None, min_length=3, max_length=50)
+    full_name: Optional[str] = Field(None, min_length=2, max_length=100)
+
+class PasswordUpdateRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=8)
+
+class ProfileUpdateResponse(BaseModel):
+    message: str
+    updated_fields: List[str]
+
 # --- Inter-Organization Contract Models ---
 class ContractResource(BaseModel):
     resource_name: str

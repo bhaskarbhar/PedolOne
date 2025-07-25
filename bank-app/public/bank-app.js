@@ -1,5 +1,6 @@
-// StockBroker Demo Application
-const API_BASE_URL = 'http://localhost:8000';
+// BankABC Demo Application
+
+const API_BASE_URL = 'https://pedolone.onrender.com' || 'http://localhost:8000';
 
 // DOM Elements
 const consentForm = document.getElementById('consentForm');
@@ -19,6 +20,7 @@ consentForm.addEventListener('submit', async (e) => {
     const email = document.getElementById('email').value;
     const aadhaar = document.getElementById('aadhaar').value;
     const pan = document.getElementById('pan').value;
+    const account = document.getElementById('account').value;
     const consent = document.getElementById('consent').checked;
 
     if (!consent) {
@@ -32,7 +34,7 @@ consentForm.addEventListener('submit', async (e) => {
     }
 
     // At least one PII field should be provided
-    if (!aadhaar && !pan) {
+    if (!aadhaar && !pan && !account) {
         showNotification('Please provide at least one form of identification', 'error');
         return;
     }
@@ -41,7 +43,7 @@ consentForm.addEventListener('submit', async (e) => {
     submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processing...';
 
     try {
-        const response = await fetch(`${API_BASE_URL}/stockbroker/consent`, {
+        const response = await fetch(`${API_BASE_URL}/bank/consent`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -50,6 +52,7 @@ consentForm.addEventListener('submit', async (e) => {
                 email: email,
                 aadhaar: aadhaar || null,
                 pan: pan || null,
+                account: account || null,
                 consent: consent
             })
         });
@@ -69,7 +72,6 @@ consentForm.addEventListener('submit', async (e) => {
             showNotification(data.detail || 'Failed to process consent', 'error');
         }
     } catch (error) {
-        console.error('Error:', error);
         showNotification('Network error. Please try again.', 'error');
     } finally {
         submitBtn.disabled = false;
@@ -92,7 +94,7 @@ document.getElementById('otpForm').addEventListener('submit', async (e) => {
     verifyBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Verifying...';
 
     try {
-        const response = await fetch(`${API_BASE_URL}/stockbroker/verify-otp`, {
+        const response = await fetch(`${API_BASE_URL}/bank/verify-otp`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -115,7 +117,6 @@ document.getElementById('otpForm').addEventListener('submit', async (e) => {
             showNotification(data.detail || 'Invalid verification code', 'error');
         }
     } catch (error) {
-        console.error('Error:', error);
         showNotification('Network error. Please try again.', 'error');
     } finally {
         verifyBtn.disabled = false;
@@ -134,7 +135,7 @@ resendBtn.addEventListener('click', async () => {
     resendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Sending...';
 
     try {
-        const response = await fetch(`${API_BASE_URL}/stockbroker/resend-otp`, {
+        const response = await fetch(`${API_BASE_URL}/bank/resend-otp`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -153,7 +154,6 @@ resendBtn.addEventListener('click', async () => {
             showNotification(data.detail || 'Failed to resend code', 'error');
         }
     } catch (error) {
-        console.error('Error:', error);
         showNotification('Network error. Please try again.', 'error');
     } finally {
         resendBtn.disabled = false;
@@ -171,6 +171,11 @@ document.getElementById('aadhaar').addEventListener('input', function(e) {
 document.getElementById('pan').addEventListener('input', function(e) {
     let value = e.target.value.replace(/[^A-Z0-9]/g, '').toUpperCase();
     if (value.length > 10) value = value.slice(0, 10);
+    e.target.value = value;
+});
+
+document.getElementById('account').addEventListener('input', function(e) {
+    let value = e.target.value.replace(/\D/g, '');
     e.target.value = value;
 });
 
@@ -232,19 +237,6 @@ document.addEventListener('DOMContentLoaded', function() {
         
         card.addEventListener('mouseleave', function() {
             this.style.transform = 'translateY(0)';
-        });
-    });
-
-    // Add hover effects to trading feature cards
-    const tradingCards = document.querySelectorAll('.grid-cols-1.md\\:grid-cols-2.lg\\:grid-cols-4 > div');
-    tradingCards.forEach(card => {
-        card.addEventListener('mouseenter', function() {
-            this.style.transform = 'scale(1.05)';
-            this.style.transition = 'transform 0.3s ease';
-        });
-        
-        card.addEventListener('mouseleave', function() {
-            this.style.transform = 'scale(1)';
         });
     });
 }); 

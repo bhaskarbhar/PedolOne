@@ -1,5 +1,4 @@
 import os
-import json
 import uuid
 import csv
 from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File, Form
@@ -15,8 +14,7 @@ from cryptography.fernet import Fernet
 import base64
 
 from models import (
-    DataAccessRequest, CreateDataRequest, RespondToRequest,
-    InterOrgContract, CreateInterOrgContract
+    DataAccessRequest, CreateDataRequest, RespondToRequest
 )
 from helpers import users_collection, user_pii_collection, policies_collection, logs_collection
 from jwt_utils import get_current_user, TokenData

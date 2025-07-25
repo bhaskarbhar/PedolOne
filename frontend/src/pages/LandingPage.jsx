@@ -197,6 +197,7 @@ export default function LandingPage() {
             Want to partner, integrate, or learn more? We'd love to talk.
           </p>
           <button 
+            onClick={() => navigate('/contact')}
             style={{
               padding: '12px 24px',
               fontSize: '1rem',
@@ -211,7 +212,7 @@ export default function LandingPage() {
             onMouseOver={(e) => e.target.style.backgroundColor = '#1d4ed8'}
             onMouseOut={(e) => e.target.style.backgroundColor = '#2563eb'}
           >
-            Email Us
+            Contact Us
           </button>
         </div>
       </section>
