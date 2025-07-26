@@ -97,7 +97,7 @@ const authReducer = (state, action) => {
 const AuthContext = createContext();
 
 // API base URL - adjust this to match your backend
-const API_BASE_URL = 'https://pedolone.onrender.com' || 'http://localhost:8000';
+const API_BASE_URL = 'http://localhost:8000';
 
 // AuthProvider component
 export const AuthProvider = ({ children }) => {
@@ -151,6 +151,9 @@ export const AuthProvider = ({ children }) => {
         ? `${API_BASE_URL}/auth/register/organization`
         : `${API_BASE_URL}/auth/register/user`;
 
+      console.log('Registration endpoint:', endpoint);
+      console.log('Registration data:', userData);
+
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
@@ -160,6 +163,7 @@ export const AuthProvider = ({ children }) => {
       });
 
       const data = await response.json();
+      console.log('Registration response:', response.status, data);
 
       if (response.ok) {
         dispatch({ type: AUTH_ACTIONS.REGISTER_SUCCESS });
@@ -222,6 +226,8 @@ export const AuthProvider = ({ children }) => {
   // Verify OTP and complete login
   const verifyLogin = async (email, otp) => {
     try {
+      console.log('Verify Login Request:', { email, otp });
+
       const response = await fetch(`${API_BASE_URL}/auth/verify-login`, {
         method: 'POST',
         headers: {
@@ -231,6 +237,7 @@ export const AuthProvider = ({ children }) => {
       });
 
       const data = await response.json();
+      console.log('Verify Login Response:', response.status, data);
 
       if (response.ok) {
         // Store token

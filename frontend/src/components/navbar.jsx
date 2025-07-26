@@ -46,15 +46,15 @@ export default function Navbar() {
                 <Link to="/" className="text-gray-700 hover:text-blue-700 transition-colors duration-200">
                   Home
                 </Link>
-                <Link to="/features" className="text-gray-700 hover:text-blue-700 transition-colors duration-200">
+                <a href="#features" className="text-gray-700 hover:text-blue-700 transition-colors duration-200">
                   Features
-                </Link>
-                <Link to="/about" className="text-gray-700 hover:text-blue-700 transition-colors duration-200">
+                </a>
+                <a href="#about" className="text-gray-700 hover:text-blue-700 transition-colors duration-200">
                   About
-                </Link>
-                <Link to="/contact" className="text-gray-700 hover:text-blue-700 transition-colors duration-200">
+                </a>
+                <a href="#contact" className="text-gray-700 hover:text-blue-700 transition-colors duration-200">
                   Contact
-                </Link>
+                </a>
                 <div className="flex space-x-2">
                   <Link 
                     to="/login/user" 
@@ -107,14 +107,13 @@ export default function Navbar() {
                         Dashboard
                       </Link>
                       
-                      <Link
-                        to="/settings"
+                      <button
                         className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                         onClick={() => setProfileOpen(false)}
                       >
                         <Settings size={16} className="mr-2" />
                         Settings
-                      </Link>
+                      </button>
                       
                       <button
                         onClick={handleLogout}
@@ -155,27 +154,27 @@ export default function Navbar() {
                   >
                     Home
                   </Link>
-                  <Link
-                    to="/features"
+                  <a
+                    href="#features"
                     className="block px-3 py-2 text-gray-700 hover:text-blue-700 hover:bg-gray-50 rounded-md transition-colors duration-200"
                     onClick={() => setIsOpen(false)}
                   >
                     Features
-                  </Link>
-                  <Link
-                    to="/about"
+                  </a>
+                  <a
+                    href="#about"
                     className="block px-3 py-2 text-gray-700 hover:text-blue-700 hover:bg-gray-50 rounded-md transition-colors duration-200"
                     onClick={() => setIsOpen(false)}
                   >
                     About
-                  </Link>
-                  <Link
-                    to="/contact"
+                  </a>
+                  <a
+                    href="#contact"
                     className="block px-3 py-2 text-gray-700 hover:text-blue-700 hover:bg-gray-50 rounded-md transition-colors duration-200"
                     onClick={() => setIsOpen(false)}
                   >
                     Contact
-                  </Link>
+                  </a>
                   <div className="border-t border-gray-200 pt-2 mt-2">
                     <Link 
                       to="/login/user" 
@@ -219,14 +218,13 @@ export default function Navbar() {
                     Dashboard
                   </Link>
                   
-                  <Link
-                    to="/settings"
+                  <button
                     className="flex items-center w-full px-3 py-2 text-gray-700 hover:text-blue-700 hover:bg-gray-50 rounded-md transition-colors duration-200"
                     onClick={() => setIsOpen(false)}
                   >
                     <Settings size={16} className="mr-2" />
                     Settings
-                  </Link>
+                  </button>
                   
                   <button
                     onClick={() => {
