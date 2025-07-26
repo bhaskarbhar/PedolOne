@@ -7,20 +7,10 @@
     "dev": "npx http-server -p 3000 -o",
     "start": "npx http-server -p 3000"
   },
-  "keywords": [
-    "trading",
-    "pedolone",
-    "demo",
-    "pii"
-  ],
+  "keywords": ["trading", "pedolone", "demo", "pii"],
   "author": "PedolOne",
   "license": "MIT",
   "devDependencies": {
     "http-server": "^14.1.1"
-  },
-  "dependencies": {
-    "dotenv": "^17.2.0",
-    "express": "^5.1.0",
-    "http-proxy-middleware": "^3.0.5"
   }
-}
+} 

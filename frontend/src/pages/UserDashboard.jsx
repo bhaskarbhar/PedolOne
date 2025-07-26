@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Shield, Users, FileText, Eye, AlertCircle, 
-  Send, CheckCircle, XCircle,
-  UserCheck
+  Send, CheckCircle, XCircle, Clock, Building2,
+  UserCheck, UserX, Mail, Calendar, Target
 } from 'lucide-react';
 import MaskedDataCard from '../components/MaskedDataCard';
 import ConsentCard from '../components/ConsentCard';
@@ -43,6 +43,7 @@ const UserDashboard = () => {
   const [showUserDetailModal, setShowUserDetailModal] = useState(false);
   
   const [socket, setSocket] = useState(null);
+
   // Helper function to mask PII data
   const maskPII = (type, value) => {
     if (!value) return 'XXXX';
@@ -176,12 +177,11 @@ const UserDashboard = () => {
   // Initialize WebSocket connection
   useEffect(() => {
     if (!user?.userid || !token) return;
-    const BACKEND_URL = "https://pedolone.onrender.com" || "http://localhost:8000";
-    const wsProtocol = BACKEND_URL.startsWith('https') ? 'wss' : 'ws';
-    const wsUrl = `${wsProtocol}://${BACKEND_URL.replace(/^https?:\/\//, '')}/ws/user/${user.userid}?token=${token}`;
-    const ws = new WebSocket(wsUrl);
+
+    const ws = new WebSocket(`ws://localhost:8000/ws/user/${user.userid}?token=${token}`);
 
     ws.onopen = () => {
+      console.log('WebSocket connected');
     };
 
     ws.onmessage = (event) => {
@@ -240,9 +240,11 @@ const UserDashboard = () => {
     };
 
     ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
     };
 
     ws.onclose = () => {
+      console.log('WebSocket disconnected');
     };
 
     setSocket(ws);
@@ -305,6 +307,7 @@ const UserDashboard = () => {
         setDataRequests(requestsResponse.data || []);
       }
     } catch (err) {
+      console.error('Error sending data request:', err);
     }
   };
 
@@ -317,6 +320,7 @@ const UserDashboard = () => {
       }, getAuthConfig());
       fetchUserData(); // Refresh data
     } catch (err) {
+      console.error('Error responding to request:', err);
     }
   };
 
@@ -329,6 +333,7 @@ const UserDashboard = () => {
       });
       setShowUserDetailModal(true);
     } catch (err) {
+      console.error('Error fetching user details:', err);
     }
   };
 
