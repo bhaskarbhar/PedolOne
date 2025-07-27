@@ -2,6 +2,8 @@ import os
 import json
 import uuid
 import hashlib
+import hmac
+import base64
 from fastapi import APIRouter, HTTPException, Depends, Request
 from datetime import datetime, timedelta
 from fastapi.encoders import jsonable_encoder
@@ -38,9 +40,16 @@ inter_org_contracts_collection.create_index("ends_at", expireAfterSeconds=0)
 
 
 def generate_resource_signature(resource_name: str, purpose: List[str], retention_window: str, created_at: datetime, ends_at: datetime) -> str:
-    """Generate a unique signature for a resource"""
+    """Generate HMAC-SHA256 signature for a resource"""
     signature_data = f"{resource_name}:{','.join(purpose)}:{retention_window}:{created_at.isoformat()}:{ends_at.isoformat()}"
-    return hashlib.sha256(signature_data.encode()).hexdigest()
+    secret_key = os.getenv("RESOURCE_SECRET_KEY", "default-resource-secret-key")
+    signature = hmac.new(secret_key.encode(), signature_data.encode(), hashlib.sha256).digest()
+    return base64.b64encode(signature).decode()
+
+def verify_resource_signature(resource_name: str, purpose: List[str], retention_window: str, created_at: datetime, ends_at: datetime, signature: str) -> bool:
+    """Verify HMAC-SHA256 signature for a resource"""
+    expected_signature = generate_resource_signature(resource_name, purpose, retention_window, created_at, ends_at)
+    return hmac.compare_digest(signature, expected_signature)
 
 async def log_contract_action(contract_id: str, action_type: str, action_by: int, action_by_org_id: str, 
                        action_details: dict, ip_address: str = None, user_agent: str = None):

@@ -5,8 +5,10 @@ from typing import List, Optional
 import os
 import uuid
 import hashlib
+import hmac
 import shutil
 import base64
+import json
 from pathlib import Path
 import PyPDF2
 import io
@@ -91,6 +93,64 @@ def decrypt_pdf_content(encrypted_content: bytes) -> bytes:
     """Return PDF content as-is (no decryption needed)"""
     # For now, return content as-is since we're not encrypting
     return encrypted_content
+
+def generate_file_integrity_signature(file_content: bytes, metadata: dict) -> str:
+    """Generate HMAC-SHA256 signature for file integrity"""
+    # Create a canonical representation of file content and metadata, handling datetime objects
+    def serialize_datetime(obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return obj
+    
+    # Convert datetime objects in metadata
+    serializable_metadata = {}
+    for key, value in metadata.items():
+        if isinstance(value, dict):
+            serializable_metadata[key] = {k: serialize_datetime(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            serializable_metadata[key] = [serialize_datetime(item) for item in value]
+        else:
+            serializable_metadata[key] = serialize_datetime(value)
+    
+    content_hash = hashlib.sha256(file_content).hexdigest()
+    metadata_str = json.dumps(serializable_metadata, sort_keys=True, separators=(',', ':'))
+    signature_data = f"{content_hash}:{metadata_str}"
+    secret_key = os.getenv("FILE_INTEGRITY_SECRET_KEY", "default-file-integrity-secret-key")
+    signature = hmac.new(secret_key.encode(), signature_data.encode(), hashlib.sha256).digest()
+    return base64.b64encode(signature).decode()
+
+def verify_file_integrity_signature(file_content: bytes, metadata: dict, signature: str) -> bool:
+    """Verify HMAC-SHA256 signature for file integrity"""
+    expected_signature = generate_file_integrity_signature(file_content, metadata)
+    return hmac.compare_digest(signature, expected_signature)
+
+def generate_file_request_signature(request_data: dict) -> str:
+    """Generate HMAC-SHA256 signature for file request integrity"""
+    # Create a canonical representation of the request data, handling datetime objects
+    def serialize_datetime(obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return obj
+    
+    # Convert datetime objects to ISO format strings
+    serializable_data = {}
+    for key, value in request_data.items():
+        if isinstance(value, dict):
+            serializable_data[key] = {k: serialize_datetime(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            serializable_data[key] = [serialize_datetime(item) for item in value]
+        else:
+            serializable_data[key] = serialize_datetime(value)
+    
+    signature_data = json.dumps(serializable_data, sort_keys=True, separators=(',', ':'))
+    secret_key = os.getenv("FILE_REQUEST_SECRET_KEY", "default-file-request-secret-key")
+    signature = hmac.new(secret_key.encode(), signature_data.encode(), hashlib.sha256).digest()
+    return base64.b64encode(signature).decode()
+
+def verify_file_request_signature(request_data: dict, signature: str) -> bool:
+    """Verify HMAC-SHA256 signature for file request integrity"""
+    expected_signature = generate_file_request_signature(request_data)
+    return hmac.compare_digest(signature, expected_signature)
 
 @router.post("/request-file")
 async def create_file_request(
@@ -408,7 +468,21 @@ async def upload_file_for_request(
     )
     
     # Insert shared file record
-    shared_files_collection.insert_one(shared_file.model_dump(by_alias=True, exclude={"id"}))
+    shared_file_data = shared_file.model_dump(by_alias=True, exclude={"id"})
+    
+    # Generate HMAC signature for file integrity
+    file_metadata = {
+        "file_id": file_id,
+        "file_name": file.filename,
+        "file_size": len(content),
+        "uploaded_at": shared_file_data["uploaded_at"].isoformat(),
+        "sender_org_id": user_org_id,
+        "receiver_org_id": file_request["requester_org_id"]
+    }
+    integrity_signature = generate_file_integrity_signature(content, file_metadata)
+    shared_file_data["integrity_signature"] = integrity_signature
+    
+    shared_files_collection.insert_one(shared_file_data)
     
     # Update file request
     file_requests_collection.update_one(
@@ -549,8 +623,22 @@ async def direct_file_share(
         print(f"✅ [Direct Share] SharedFile model created successfully")
         
         # Insert shared file record
-        shared_files_collection.insert_one(shared_file.model_dump(by_alias=True, exclude={"id"}))
-        print(f"✅ [Direct Share] File record inserted into database")
+        shared_file_data = shared_file.model_dump(by_alias=True, exclude={"id"})
+        
+        # Generate HMAC signature for file integrity
+        file_metadata = {
+            "file_id": file_id,
+            "file_name": file.filename,
+            "file_size": len(content),
+            "uploaded_at": shared_file_data["uploaded_at"].isoformat(),
+            "sender_org_id": user.get("organization_id"),
+            "receiver_org_id": target_org_id
+        }
+        integrity_signature = generate_file_integrity_signature(content, file_metadata)
+        shared_file_data["integrity_signature"] = integrity_signature
+        
+        shared_files_collection.insert_one(shared_file_data)
+        print(f"✅ [Direct Share] File record inserted into database with integrity signature")
         
     except Exception as e:
         print(f"❌ [Direct Share] Error creating SharedFile model: {e}")

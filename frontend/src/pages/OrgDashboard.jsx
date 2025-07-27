@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Building2, Users, FileText, Shield, Database, Activity, Calendar, Settings, TrendingUp, AlertTriangle, CheckCircle, Clock, Eye, Download, Plus, X, Edit, Trash2, History, Search, AlertCircle
@@ -646,7 +646,7 @@ export default function OrgDashboard() {
         const api = createAxiosInstance();
         await api.post('/data-requests/respond', {
           request_id: requestId,
-          response: 'rejected',
+          status: 'rejected',
           response_message: 'Request rejected by organization admin'
         });
         window.location.reload();
