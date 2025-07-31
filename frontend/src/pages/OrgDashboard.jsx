@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Building2, Users, FileText, Shield, Database, Activity, Calendar, Settings, TrendingUp, AlertTriangle, CheckCircle, Clock, Eye, Download, Plus, X, Edit, Trash2, History, Search, AlertCircle
@@ -375,6 +375,8 @@ export default function OrgDashboard() {
         
         const api = createAxiosInstance();
         
+        console.log('Fetching data for organization:', orgId);
+        
         // Fetch organization info
         const orgResponse = await api.get(`/organization/${orgId}`);
         setOrgInfo(orgResponse.data);
@@ -525,6 +527,7 @@ export default function OrgDashboard() {
         
         setLoading(false);
       } catch (err) {
+        console.error('Error fetching organization data:', err);
         setError('Failed to load organization data. Please try again later.');
         setLoading(false);
       }
@@ -632,6 +635,7 @@ export default function OrgDashboard() {
       // Refresh data
       window.location.reload();
     } catch (err) {
+      console.error('Error approving request:', err);
       alert('Failed to approve request: ' + (err.response?.data?.detail || err.message));
     }
   };
@@ -642,7 +646,7 @@ export default function OrgDashboard() {
         const api = createAxiosInstance();
         await api.post('/data-requests/respond', {
           request_id: requestId,
-          response: 'rejected',
+          status: 'rejected',
           response_message: 'Request rejected by organization admin'
         });
         window.location.reload();
@@ -684,6 +688,7 @@ export default function OrgDashboard() {
       const filteredOrgs = allOrgs.filter(org => org.org_id !== orgIdToUse);
       setAvailableOrganizations(filteredOrgs);
     } catch (err) {
+      console.error('Error fetching available organizations:', err);
       // Fallback to fetching all organizations
       try {
         const api = createAxiosInstance();
@@ -704,6 +709,7 @@ export default function OrgDashboard() {
       const users = response.data.users || [];
       setAvailableUsers(users);
     } catch (err) {
+      console.error('Error fetching users for organization:', err);
       setAvailableUsers([]);
     }
   };
@@ -760,6 +766,7 @@ export default function OrgDashboard() {
       const allResources = [...new Set([...resources, ...commonResources])];
       setAvailableResources(allResources);
     } catch (err) {
+      console.error('Error fetching available resources:', err);
       // Fallback to common PII types
       setAvailableResources(['email', 'phone', 'address', 'ssn', 'bank_account', 'credit_card', 'aadhaar', 'pan']);
     }
@@ -938,6 +945,7 @@ export default function OrgDashboard() {
       const filteredOrgs = allOrgs.filter(org => org.org_id !== orgIdToUse);
       setAllOrganizations(filteredOrgs);
     } catch (err) {
+      console.error('Error fetching all organizations:', err);
       setCreateContractError('Failed to fetch organizations');
     }
   };
@@ -1119,6 +1127,7 @@ export default function OrgDashboard() {
       // Refresh data
       window.location.reload();
     } catch (err) {
+      console.error('Error approving contract:', err);
       alert('Failed to approve contract: ' + (err.response?.data?.detail || err.message));
     }
   };
@@ -1136,6 +1145,7 @@ export default function OrgDashboard() {
       // Refresh data
       window.location.reload();
     } catch (err) {
+      console.error('Error rejecting contract:', err);
       alert('Failed to reject contract: ' + (err.response?.data?.detail || err.message));
     }
   };

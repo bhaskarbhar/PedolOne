@@ -1,4 +1,3 @@
-
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Body, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timedelta
@@ -7,21 +6,22 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
+from typing import Optional
 import asyncio
 from dotenv import load_dotenv
 import secrets
 import uuid
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr
+
 from models import (
     UserRegistration, UserLogin, OTPVerification, LoginVerification, 
-    Token, TokenData, UserResponse, LoginResponse, RegisterResponse,
-    PIIInput, ProfileUpdateRequest, PasswordUpdateRequest, ProfileUpdateResponse
+    User, Token, TokenData, UserResponse, LoginResponse, RegisterResponse,
+    UserPIIEntry, UserPIIMap, PIIInput
 )
 from jwt_utils import create_access_token, get_current_user, get_token_expiry_time
 from helpers import users_collection, user_pii_collection, encrypt_pii, decrypt_pii, validate_password_strength, logs_collection, get_client_ip
 from routers.pii_tokenizer import tokenize_aadhaar, tokenize_pan
-
 
 # Load environment variables
 load_dotenv()
@@ -713,12 +713,6 @@ async def add_user_pii(user_id: int, resource: str, pii_value: str):
         upsert=False
     )
     
-    # If no existing entry was found, add new one
-    user_pii_collection.update_one(
-        {"user_id": user_id, "pii.resource": {"$ne": resource}},
-        {"$push": {"pii": entry}},
-        upsert=False
-    )
     return {"status": "success", "resource": resource, "token": token}
 
 @router.get("/user-pii/{user_id}")
@@ -755,116 +749,4 @@ async def update_organization_id(data: UpdateOrgIdRequest):
     if result.modified_count == 1:
         return {"status": "success", "message": "Organization ID updated for user."}
     else:
-        raise HTTPException(status_code=404, detail="User not found or organization ID not updated.")
-
-@router.put("/update-profile", response_model=ProfileUpdateResponse)
-async def update_profile(
-    profile_data: ProfileUpdateRequest,
-    current_user: TokenData = Depends(get_current_user)
-):
-    """Update user profile information"""
-    try:
-        # Find the user
-        user = users_collection.find_one({"userid": current_user.user_id})
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        
-        # Prepare update fields
-        update_fields = {}
-        updated_fields = []
-        
-        # Check if email is being updated
-        if profile_data.email and profile_data.email != user["email"]:
-            # Check if email is already taken
-            existing_user = users_collection.find_one({"email": profile_data.email})
-            if existing_user and existing_user["userid"] != current_user.user_id:
-                raise HTTPException(status_code=400, detail="Email already registered")
-            update_fields["email"] = profile_data.email
-            updated_fields.append("email")
-        
-        # Check if username is being updated
-        if profile_data.username and profile_data.username != user["username"]:
-            # Check if username is already taken
-            existing_user = users_collection.find_one({"username": profile_data.username})
-            if existing_user and existing_user["userid"] != current_user.user_id:
-                raise HTTPException(status_code=400, detail="Username already taken")
-            update_fields["username"] = profile_data.username
-            updated_fields.append("username")
-        
-        # Check if full name is being updated
-        if profile_data.full_name and profile_data.full_name != user["full_name"]:
-            update_fields["full_name"] = profile_data.full_name
-            updated_fields.append("full_name")
-        
-        # If no fields to update, return early
-        if not update_fields:
-            return ProfileUpdateResponse(
-                message="No changes to update",
-                updated_fields=[]
-            )
-        
-        # Update the user
-        result = users_collection.update_one(
-            {"userid": current_user.user_id},
-            {"$set": update_fields}
-        )
-        
-        if result.modified_count == 0:
-            raise HTTPException(status_code=400, detail="Failed to update profile")
-        
-        return ProfileUpdateResponse(
-            message="Profile updated successfully",
-            updated_fields=updated_fields
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error updating profile: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.put("/update-password")
-async def update_password(
-    password_data: PasswordUpdateRequest,
-    current_user: TokenData = Depends(get_current_user)
-):
-    """Update user password"""
-    try:
-        # Find the user
-        user = users_collection.find_one({"userid": current_user.user_id})
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        
-        # Verify current password
-        if not verify_password(password_data.current_password, user["password_hash"]):
-            raise HTTPException(status_code=400, detail="Current password is incorrect")
-        
-        # Validate new password strength
-        is_strong, message = validate_password_strength(password_data.new_password)
-        if not is_strong:
-            raise HTTPException(status_code=400, detail=message)
-        
-        # Hash the new password
-        new_password_hash = hash_password(password_data.new_password)
-        
-        # Update the password
-        result = users_collection.update_one(
-            {"userid": current_user.user_id},
-            {"$set": {"password_hash": new_password_hash}}
-        )
-        
-        if result.modified_count == 0:
-            raise HTTPException(status_code=400, detail="Failed to update password")
-        
-        return {"message": "Password updated successfully"}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error updating password: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") 
-
         raise HTTPException(status_code=404, detail="User not found or organization ID not updated.") 
-
-        raise HTTPException(status_code=404, detail="User not found or organization ID not updated.") 
-

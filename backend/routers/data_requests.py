@@ -1,6 +1,9 @@
 import os
+import json
 import uuid
 import csv
+import hashlib
+import hmac
 from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File, Form
 from datetime import datetime, timedelta
 from fastapi.encoders import jsonable_encoder
@@ -14,7 +17,8 @@ from cryptography.fernet import Fernet
 import base64
 
 from models import (
-    DataAccessRequest, CreateDataRequest, RespondToRequest
+    DataAccessRequest, CreateDataRequest, RespondToRequest,
+    InterOrgContract, CreateInterOrgContract
 )
 from helpers import users_collection, user_pii_collection, policies_collection, logs_collection
 from jwt_utils import get_current_user, TokenData
@@ -81,6 +85,64 @@ def get_organization_by_id(org_id: str):
 def get_user_by_email(email: str):
     """Get user by email"""
     return users_collection.find_one({"email": email})
+
+def generate_data_request_signature(request_data: dict) -> str:
+    """Generate HMAC-SHA256 signature for data request integrity"""
+    # Create a canonical representation of the request data, handling datetime objects
+    def serialize_datetime(obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return obj
+    
+    # Convert datetime objects to ISO format strings
+    serializable_data = {}
+    for key, value in request_data.items():
+        if isinstance(value, dict):
+            serializable_data[key] = {k: serialize_datetime(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            serializable_data[key] = [serialize_datetime(item) for item in value]
+        else:
+            serializable_data[key] = serialize_datetime(value)
+    
+    signature_data = json.dumps(serializable_data, sort_keys=True, separators=(',', ':'))
+    secret_key = os.getenv("DATA_REQUEST_SECRET_KEY", "default-data-request-secret-key")
+    signature = hmac.new(secret_key.encode(), signature_data.encode(), hashlib.sha256).digest()
+    return base64.b64encode(signature).decode()
+
+def verify_data_request_signature(request_data: dict, signature: str) -> bool:
+    """Verify HMAC-SHA256 signature for data request integrity"""
+    expected_signature = generate_data_request_signature(request_data)
+    return hmac.compare_digest(signature, expected_signature)
+
+def generate_csv_file_signature(file_content: bytes, metadata: dict) -> str:
+    """Generate HMAC-SHA256 signature for CSV file integrity"""
+    # Combine file content hash with metadata, handling datetime objects
+    def serialize_datetime(obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return obj
+    
+    # Convert datetime objects in metadata
+    serializable_metadata = {}
+    for key, value in metadata.items():
+        if isinstance(value, dict):
+            serializable_metadata[key] = {k: serialize_datetime(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            serializable_metadata[key] = [serialize_datetime(item) for item in value]
+        else:
+            serializable_metadata[key] = serialize_datetime(value)
+    
+    content_hash = hashlib.sha256(file_content).hexdigest()
+    metadata_str = json.dumps(serializable_metadata, sort_keys=True, separators=(',', ':'))
+    signature_data = f"{content_hash}:{metadata_str}"
+    secret_key = os.getenv("CSV_FILE_SECRET_KEY", "default-csv-file-secret-key")
+    signature = hmac.new(secret_key.encode(), signature_data.encode(), hashlib.sha256).digest()
+    return base64.b64encode(signature).decode()
+
+def verify_csv_file_signature(file_content: bytes, metadata: dict, signature: str) -> bool:
+    """Verify HMAC-SHA256 signature for CSV file integrity"""
+    expected_signature = generate_csv_file_signature(file_content, metadata)
+    return hmac.compare_digest(signature, expected_signature)
 
 @router.post("/send-request")
 async def send_data_request(
@@ -264,6 +326,11 @@ async def send_data_request(
     
     # Insert into database - exclude id field to let MongoDB generate new _id
     data_request_data = data_request.model_dump(by_alias=True, exclude={"id"})
+    
+    # Generate HMAC signature for data request integrity
+    signature = generate_data_request_signature(data_request_data)
+    data_request_data["integrity_signature"] = signature
+    
     result = data_requests_collection.insert_one(data_request_data)
     
     # Send WebSocket notification to target user
@@ -437,6 +504,11 @@ async def create_csv_file(
             "record_count": len(csv_data),
             "bulk_request_id": bulk_request_id
         }
+        
+        # Generate HMAC signature for CSV file integrity
+        csv_file_content = csv_content.encode('utf-8')
+        signature = generate_csv_file_signature(csv_file_content, file_metadata)
+        file_metadata["integrity_signature"] = signature
         
         csv_files_collection.insert_one(file_metadata)
         
@@ -1778,6 +1850,10 @@ async def create_bulk_data_request(
             "is_bulk_request": True,  # Mark as bulk request
             "bulk_request_size": len(request_data.selected_users)
         }
+        
+        # Generate HMAC signature for data request integrity
+        signature = generate_data_request_signature(data_request)
+        data_request["integrity_signature"] = signature
         
         data_requests_collection.insert_one(data_request)
         created_requests.append(data_request)

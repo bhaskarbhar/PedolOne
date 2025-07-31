@@ -34,8 +34,3 @@ async def startup_event():
     """Seed organizations on startup"""
     seed_organizations()
     print("Organizations seeded successfully")
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    return {"status": "ok"}

@@ -9,14 +9,6 @@ import OrgDashboard from './pages/OrgDashboard';
 import UserSignup from './pages/UserSignup';
 import OrgSignup from './pages/OrgSignup';
 import VerificationSuccess from './pages/VerificationSuccess';
-import Features from './pages/Features';
-import About from './pages/About';
-import Contact from './pages/Contact';
-import Settings from './pages/Settings';
-import Policy from './pages/Policy';
-import TermsOfService from './pages/TermsOfService';
-import Security from './pages/Security';
-import PrivacyPolicy from './pages/PrivacyPolicy';
 import Navbar from './components/navbar';
 import Footer from './components/footer';
 function App() {

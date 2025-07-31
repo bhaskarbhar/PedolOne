@@ -2,7 +2,7 @@ import json
 from fastapi import APIRouter, HTTPException, Request, Depends
 from datetime import datetime
 from fastapi.encoders import jsonable_encoder
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 
 from helpers import (
