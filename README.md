@@ -1,8 +1,5 @@
 # PedolOne: Privacy-First Data Vault & Sharing Platform
 
-**Team NFSU**  
-Contributors: Bhaskar Bhar, Aryan Sakaria, Deeksha Singh
-
 ---
 
 ## Executive Summary
